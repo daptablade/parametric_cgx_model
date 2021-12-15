@@ -1,0 +1,24 @@
+SOL 103
+CEND
+ECHO = NONE
+SUBCASE 1
+   SUBTITLE=normal modes
+   METHOD = 1
+   SPC = 1
+   VECTOR(SORT1,REAL)=ALL
+   SPCFORCES(SORT1,REAL)=ALL
+   BOUTPUT(SORT1,REAL)=ALL
+$ Direct Text Input for this Subcase
+BEGIN BULK
+$ Direct Text Input for Bulk Data
+MDLPRM   HDF5    0
+PARAM   PRTMAXIM YES
+PARAM   K6ROT    100.0
+EIGRL    1                       10      0                       MASS
+$ Material: Aluminium
+MAT1     1       7.+10           .3      2710.
+$ Shell section 
+PSHELL   1       1       .002    1               1  
+$ ------------------------------ Files genererated by parametric_box.py     
+INCLUDE 'SPC_123456.bou'
+INCLUDE 'all.bdf'
