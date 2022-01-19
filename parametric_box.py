@@ -1,6 +1,6 @@
 """
 Parametric shell half-wing model geometry creation and meshing in CGX, followed by nastran normal modes (SOL103) analysis. 
-The script assumes that CGX and nastran are installed and working. Adjust the executable calls as needed CGX_EXECUTE and NASTRAN_EXECUTE.  
+The script assumes that CGX and nastran are installed and working. Adjust the executable calls as needed in LOCAL_EXECUTES.  
 """
 
 # import external libraries
@@ -15,14 +15,31 @@ INPUTS = {
     "span": 2.0,
     "chord": 0.2,
     "airfoil_csv_file": "naca0012.csv",
-    "analysis_file": "normal_modes.bdf",
+    "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
     "nele_foil": 20,
     "nele_span": 40,
     "node_merge_tol": 0.002,
+    "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
+    "cgx_solver": "abq",  # or "nas"
+    "fea_solver": "CALCULIX",  # or "NASTRAN"
+    "composite_plies": [
+        {"id": "p_0", "thickness": 0.0002, "elements": "EL", "orientation": "ORI_0"},
+        {"id": "p_90", "thickness": 0.0002, "elements": "EL", "orientation": "ORI_90"},
+    ],
+    "orientations": [
+        {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
+        {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
+    ],
+    "composite_layup": (["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]),
+    "composite_props_file": "composite_shell.inp",
+    "mesh_file": "all.msh",  # only required if CGX output needs edits
 }
 
-CGX_EXECUTE = "wsl /usr/local/bin/cgx_2.15"
-NASTRAN_EXECUTE = "nastran"
+LOCAL_EXECUTES = {
+    "CGX": "wsl /usr/local/bin/cgx_2.15",
+    "CALCULIX": "wsl /usr/local/bin/ccx_2.19",
+    "NASTRAN": "nastran",
+}
 
 
 def main(inputs):
@@ -38,8 +55,11 @@ def main(inputs):
     execute_CGX(infile)
     print(f"Created analysis input files with CGX.")
 
+    if "composite_layup" in inputs:
+        get_composite_properties_input(inputs)
+
     # run the FEM model analysis
-    execute_nastran(inputs["analysis_file"])
+    execute_fea(inputs["analysis_file"], inputs["fea_solver"])
     print(f"Executed FEM analysis.\nEnd main process.")
 
 
@@ -72,7 +92,11 @@ def get_CGX_input_file(geometry, inputs):
 
     # create string of all input commands
     cgx_commands = _get_commands(
-        geometry, fix_lines, merge_tol=inputs["node_merge_tol"]
+        geometry,
+        fix_lines,
+        merge_tol=inputs["node_merge_tol"],
+        cgx_ele_type=inputs["cgx_ele_type"],
+        solver=inputs["cgx_solver"],
     )
 
     # write string of commands to file
@@ -82,20 +106,48 @@ def get_CGX_input_file(geometry, inputs):
     return fdb_geom_file
 
 
+def get_composite_properties_input(inputs):
+    """write an FEA input file with the composite properties."""
+
+    if inputs["fea_solver"] == "CALCULIX":
+
+        # check and update the element type in the mesh input file
+        str_find = "*ELEMENT, TYPE=S8,"
+        str_replace = "*ELEMENT, TYPE=S8R,"
+        _file_find_replace(
+            file=inputs["mesh_file"], find=str_find, replace_with=str_replace
+        )
+
+        # get input file cards for this solver
+        ccx_commands = _get_ccx_composite_shell_props(
+            plies=inputs["composite_plies"],
+            orientations=inputs["orientations"],
+            layup=inputs["composite_layup"],
+        )
+    else:
+        raise ValueError(
+            f"Composite properties not implemented for solver option {inputs['fea_solver']}."
+        )
+
+    # write string of commands to file
+    with open(inputs["composite_props_file"], "w") as f:
+        f.write("".join(ccx_commands))
+
+
 def execute_CGX(infile):
     """ Run CGX with the batch input file to generate the mesh output files."""
     subprocess.run(
-        CGX_EXECUTE + " -bg " + infile,
+        LOCAL_EXECUTES["CGX"] + " -bg " + infile,
         shell=True,
         check=True,
         capture_output=True,
     )
 
 
-def execute_nastran(file):
+def execute_fea(file, solver):
     """ Run CGX with the batch input file to generate the mesh output files."""
     subprocess.run(
-        NASTRAN_EXECUTE + " " + file,
+        LOCAL_EXECUTES[solver] + " " + file,
         shell=True,
         check=True,
         capture_output=True,
@@ -124,9 +176,7 @@ def _get_aerofoil_from_file(file, plot_flag=True):
         for row in reader:
             airfoil.append(row)
     name = airfoil[0]
-    coordinates = np.array(
-        [string[0].split() for string in airfoil[1:]], dtype=np.float
-    )
+    coordinates = np.array([string[0].split() for string in airfoil[1:]], dtype=float)
 
     # replace the last coordinate to close the airfoil at the trailing-edge
     coordinates[-1] = coordinates[0]
@@ -193,7 +243,7 @@ def _get_CGX_surfs_3D():
     return surfaces
 
 
-def _get_commands(geometry, fix_lines, merge_tol=0.001):
+def _get_commands(geometry, fix_lines, merge_tol=0.001, cgx_ele_type=10, solver="abq"):
 
     commands = []
 
@@ -248,7 +298,7 @@ def _get_commands(geometry, fix_lines, merge_tol=0.001):
     commands.append("# =============== \n")
     # surface meshes
     for id, _ in enumerate(geometry["surfaces"]):
-        commands.append(f"MSHP V{id:05d} s 9 0 1.000000e+00\n")
+        commands.append(f"MSHP V{id:05d} s {cgx_ele_type:d} 0 1.000000e+00\n")
 
     commands.append("# =============== \n")
     # custom export statement
@@ -256,11 +306,37 @@ def _get_commands(geometry, fix_lines, merge_tol=0.001):
     commands.append(f"merg n all {merge_tol:6f} 'nolock'\n")
     commands.append("comp nodes d\n")
     commands.append("comp SPC d\n")
-    commands.append("send SPC nas spc 123456\n")
-    commands.append("send all nas\n")
+    commands.append(f"send SPC {solver} spc 123456\n")
+    commands.append(f"send all {solver} \n")
     commands.append("quit\n")
 
     return commands
+
+
+def _get_ccx_composite_shell_props(plies=None, orientations=None, layup=None):
+
+    commands = []
+
+    # orientation cards
+    for ori in orientations:
+        commands.append(f"*ORIENTATION,NAME={ori['id']}\n")
+        commands.append(", ".join(str(x) for x in [*ori["1"], *ori["2"]]) + "\n")
+
+    commands.append("** =============== \n")
+    # shell property
+    commands.append("*SHELL SECTION,ELSET=Eall,COMPOSITE\n")
+    for ply in layup:
+        props = [p for p in plies if p["id"] == ply][0]
+        commands.append(
+            f"{props['thickness']:6f},,{props['elements']},{props['orientation']}\n"
+        )
+
+    return commands
+
+
+def _file_find_replace(file, find: str, replace_with: str):
+    # TODO implement this
+    pass
 
 
 if __name__ == "__main__":
