@@ -4,13 +4,12 @@ The script assumes that CGX and nastran are installed and working. Adjust the ex
 """
 
 # import external libraries
-from http.client import REQUEST_URI_TOO_LONG
 import warnings
-from weakref import ref
 import numpy as np
 import csv
 import subprocess
 import matplotlib.pyplot as plt
+from scipy.spatial.transform import Rotation
 
 
 # parameters from up-stream processes and analyses
@@ -48,7 +47,7 @@ LOCAL_EXECUTES = {
 def main(inputs):
     """Create a box FEM model from parametric inputs."""
 
-    print("The parametric inputs are: \n")
+    print("The parametric inputs are:")
     print(inputs)
 
     geometry = get_geometry(inputs, plot_flag=False)
@@ -73,7 +72,8 @@ def main(inputs):
     )
     print(outputs)
 
-    print("End main process.")
+    print("End main process.\n")
+    return outputs
 
 
 def get_geometry(inputs, plot_flag=False):
@@ -102,11 +102,13 @@ def get_CGX_input_file(geometry, inputs):
     fdb_geom_file = "cgx_infile.fdb"
 
     fix_lines = [0]  # constrain the root of the wing
+    loaded_lines = [1]  # apply a shear load at the tip of the wing
 
     # create string of all input commands
     cgx_commands = _get_commands(
         geometry,
         fix_lines,
+        loaded_lines,
         merge_tol=inputs["node_merge_tol"],
         cgx_ele_type=inputs["cgx_ele_type"],
         solver=inputs["cgx_solver"],
@@ -181,20 +183,20 @@ def get_fea_outputs(file, solver, mesh_file):
         for disp in range(3):
             v_mean[disp] = np.average(all_disps[:, disp + 1])
 
-        # calculate the average rotation about the section centroid
-        rotation_vectors = ([0.0, 1.0, 0.0],)
-        reference_point = "centroid"
-        rotations_mean = _get_average_rotation(
-            all_disps=all_disps,
-            mesh_file=mesh_file,
-            axes=rotation_vectors,
-            origin=reference_point,
-        )
+        # calculate the average rotations
+        rotations_mean = _get_average_rotation(all_disps=all_disps, mesh_file=mesh_file)
 
     else:
         warnings.warn(f"Output processing not implemented for solver option {solver}.")
 
-    outputs = {"Ux": v_mean[0], "Uy": v_mean[1], "Uz": v_mean[2], "Ry": rotations_mean[0]}
+    outputs = {
+        "Ux": v_mean[0],
+        "Uy": v_mean[1],
+        "Uz": v_mean[2],
+        "Rx": rotations_mean[0],
+        "Ry": rotations_mean[1],
+        "Rz": rotations_mean[2],
+    }
 
     return outputs
 
@@ -288,7 +290,9 @@ def _get_CGX_surfs_3D():
     return surfaces
 
 
-def _get_commands(geometry, fix_lines, merge_tol=0.001, cgx_ele_type=10, solver="abq"):
+def _get_commands(
+    geometry, fix_lines, loaded_lines, merge_tol=0.001, cgx_ele_type=10, solver="abq"
+):
 
     commands = []
 
@@ -335,9 +339,12 @@ def _get_commands(geometry, fix_lines, merge_tol=0.001, cgx_ele_type=10, solver=
         )
 
     commands.append("# =============== \n")
-    # SPC sets
+    # SPC and load sets
     commands.append(
         f"SETA SPC l " + " ".join([f"L{line:05d}" for line in fix_lines]) + "\n"
+    )
+    commands.append(
+        f"SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
     )
 
     commands.append("# =============== \n")
@@ -351,7 +358,9 @@ def _get_commands(geometry, fix_lines, merge_tol=0.001, cgx_ele_type=10, solver=
     commands.append(f"merg n all {merge_tol:6f} 'nolock'\n")
     commands.append("comp nodes d\n")
     commands.append("comp SPC d\n")
+    commands.append("comp LAST d\n")
     commands.append(f"send SPC {solver} spc 123456\n")
+    commands.append(f"send LAST {solver} names\n")
     commands.append(f"send all {solver} \n")
     commands.append("quit\n")
 
@@ -420,31 +429,24 @@ def _get_from_dat(file, data: str = None):
 def _get_average_rotation(
     all_disps: np.ndarray = None,
     mesh_file: str = None,
-    axes: tuple = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-    origin="centroid",
+    axes: tuple = (
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ),  # basic x, y, z axes
 ):
     # for each output node, recover the node undeformed mesh position
     # node_positions : [nodeid, x, y, z]
     node_positions = _get_nodes_from_inp(mesh_file, ref_nodes=all_disps[:, 0])
 
-    if origin == "centroid":
-        # centroid position is the average of the undeformed mesh node positions
-        origin_position = np.zeros((3))
-        for axis in range(3):
-            origin_position[axis] = np.average(node_positions[:, axis + 1])
-    elif origin == "analysis_origin":
-        origin_position = np.zeros((3))
-    else:
-        raise ValueError(
-            f"Rotation processing not implemented for option {origin}. Try option='centroid' or 'analysis_origin'."
-        )
-
+    origin_position = np.zeros((3))
     # calculate the approximate rotation from each node
     rotations = _get_rot_from_disp(all_disps, node_positions, axes, origin_position)
 
     # average the rotation values
-    rotations_mean = ()
-    # TODO implement
+    rotations_mean = np.zeros((3))
+    for rot in range(3):
+        rotations_mean[rot] = np.average(rotations[:, rot])
 
     return rotations_mean
 
@@ -473,15 +475,43 @@ def _get_nodes_from_inp(file, ref_nodes=None):
     )
 
     # filter reference nodes
-    if ref_nodes:
+    if any(ref_nodes):
         nodes_vals = np.array(
             [line for line in nodes_vals if any(line[0] == ref_nodes)], dtype=float
         )
 
     return nodes_vals
 
+
 def _get_rot_from_disp(all_disps, node_positions, axes, origin_position):
-    # TODO implement
+    """Return an array of rotations in radians. Using small deflection assumptions."""
+
+    all_rots = np.zeros((node_positions.shape[0], 3))
+    # loop throught the nodes and y rotation axes
+    for index, node in enumerate(node_positions):
+        # vector from origin to node position
+        v_op = node[1:] - origin_position
+        for col, axis in enumerate(axes):
+            # calculate local rotation unit vector
+            v_r = np.cross(axis, v_op)
+            v_r = v_r / np.linalg.norm(v_r)
+            # calculate local rotation at the centroid
+            rot = (all_disps[index, 1:] @ v_r) / np.linalg.norm(v_op)
+            if np.abs(rot) >= 1:
+                raise ValueError("Rotation error.")
+            all_rots[index, col] = rot
+
+    all_rots = np.arcsin(all_rots)
+
+    return all_rots
+
+
+def _rotate_vector(angle, starting, axis):
+    """Rotate a vector about an axis by an angle in degrees."""
+
+    r = Rotation.from_rotvec(angle * np.array(axis), degrees=True)
+    return r.apply(starting)
+
 
 if __name__ == "__main__":
     main(INPUTS)
