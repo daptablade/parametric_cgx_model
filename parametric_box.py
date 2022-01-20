@@ -1,6 +1,16 @@
 """
-Parametric shell half-wing model geometry creation and meshing in CGX, followed by nastran normal modes (SOL103) analysis. 
-The script assumes that CGX and nastran are installed and working. Adjust the executable calls as needed in LOCAL_EXECUTES.  
+Parametric shell half-wing model geometry creation and meshing in CGX, 
+followed by FEA analysis (using NASTRAN or CALCULIX). 
+
+The script assumes that CGX, CCX and nastran are installed and working. 
+Adjust the executable calls as needed in LOCAL_EXECUTES.
+Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses 
+(see References in README file).  
+
+Execute the python script 'parametric_box.py' and inspect outputs: 
+choose between 
+>> main(INPUT[0]) for a metallic Nastran model 
+>> main(INPUT[1]) for a composite Calculix model
 """
 
 # import external libraries
@@ -11,7 +21,12 @@ import subprocess
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
-
+# set these execution paths to local binaries as available
+LOCAL_EXECUTES = {
+    "CGX": "wsl /usr/local/bin/cgx_2.15",
+    "CALCULIX": "wsl /usr/local/bin/ccx_2.19",
+    "NASTRAN": "nastran",  # set to None if not installed
+}
 # parameters from up-stream processes and analyses
 INPUTS = [
     {
@@ -63,12 +78,6 @@ INPUTS = [
         "mesh_file": "all.msh",
     },
 ]
-
-LOCAL_EXECUTES = {
-    "CGX": "wsl /usr/local/bin/cgx_2.15",
-    "CALCULIX": "wsl /usr/local/bin/ccx_2.19",
-    "NASTRAN": "nastran",
-}
 
 
 def main(inputs):
@@ -178,22 +187,31 @@ def get_composite_properties_input(inputs):
 
 def execute_CGX(infile):
     """ Run CGX with the batch input file to generate the mesh output files."""
-    subprocess.run(
-        LOCAL_EXECUTES["CGX"] + " -bg " + infile,
-        shell=True,
-        check=True,
-        capture_output=True,
-    )
+    if LOCAL_EXECUTES["CGX"]:
+        subprocess.run(
+            LOCAL_EXECUTES["CGX"] + " -bg " + infile,
+            shell=True,
+            check=True,
+            capture_output=True,
+        )
+    else:
+        raise ValueError("Need to specify an execution path for CalculiX GraphiX.")
 
 
 def execute_fea(file, solver):
     """ Run CGX with the batch input file to generate the mesh output files."""
-    subprocess.run(
-        LOCAL_EXECUTES[solver] + " " + file,
-        shell=True,
-        check=True,
-        capture_output=True,
-    )
+
+    if LOCAL_EXECUTES[solver]:
+        subprocess.run(
+            LOCAL_EXECUTES[solver] + " " + file,
+            shell=True,
+            check=True,
+            capture_output=True,
+        )
+    else:
+        warnings.warn(
+            f"{solver} execution path has not been set. Model analysis is skipped."
+        )
 
 
 def get_fea_outputs(file, solver, mesh_file):
