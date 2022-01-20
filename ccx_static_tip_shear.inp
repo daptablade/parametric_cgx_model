@@ -26,6 +26,8 @@ Model: Cantilevered composite box with tip shear
 *STATIC
 *CLOAD
 LAST,3,1.0
-*NODE FILE
+*NODE FILE 
+U
+*NODE PRINT,NSET=LAST
 U
 *END STEP

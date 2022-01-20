@@ -4,6 +4,9 @@ The script assumes that CGX and nastran are installed and working. Adjust the ex
 """
 
 # import external libraries
+from http.client import REQUEST_URI_TOO_LONG
+import warnings
+from weakref import ref
 import numpy as np
 import csv
 import subprocess
@@ -48,7 +51,7 @@ def main(inputs):
     print("The parametric inputs are: \n")
     print(inputs)
 
-    geometry = get_geometry(inputs)
+    geometry = get_geometry(inputs, plot_flag=False)
     infile = get_CGX_input_file(geometry, inputs)
     print(f"Created cgx input file {infile}.")
 
@@ -60,14 +63,24 @@ def main(inputs):
 
     # run the FEM model analysis
     execute_fea(inputs["analysis_file"], inputs["fea_solver"])
-    print(f"Executed FEM analysis.\nEnd main process.")
+    print("Executed FEM analysis.")
+
+    # recover the analysis results
+    outputs = get_fea_outputs(
+        file=inputs["analysis_file"],
+        solver=inputs["fea_solver"],
+        mesh_file=inputs["mesh_file"],
+    )
+    print(outputs)
+
+    print("End main process.")
 
 
-def get_geometry(inputs):
+def get_geometry(inputs, plot_flag=False):
     """Translate parameters into geometry description that CGX can understand,
     that's points, lines and surfaces."""
 
-    aerofoil = _get_aerofoil_from_file(inputs["airfoil_csv_file"])
+    aerofoil = _get_aerofoil_from_file(inputs["airfoil_csv_file"], plot_flag=plot_flag)
     points, seqa = _get_CGX_points_3D(aerofoil, inputs["chord"], inputs["span"])
     lines = _get_CGX_lines_3D(
         seqa, nele_foil=inputs["nele_foil"], nele_span=inputs["nele_span"]
@@ -125,7 +138,7 @@ def get_composite_properties_input(inputs):
             layup=inputs["composite_layup"],
         )
     else:
-        raise ValueError(
+        warnings.warn(
             f"Composite properties not implemented for solver option {inputs['fea_solver']}."
         )
 
@@ -152,6 +165,38 @@ def execute_fea(file, solver):
         check=True,
         capture_output=True,
     )
+
+
+def get_fea_outputs(file, solver, mesh_file):
+    """ Recover the analysis outputs and process them for plotting."""
+
+    if solver == "CALCULIX":
+        # read file and recover node displacements
+        output_file = str(file) + ".dat"
+        # all_disp : [nodeid, vx, vy, vz]
+        all_disps = _get_from_dat(output_file, data="displacements")
+
+        # average the deflections
+        v_mean = np.zeros((3))
+        for disp in range(3):
+            v_mean[disp] = np.average(all_disps[:, disp + 1])
+
+        # calculate the average rotation about the section centroid
+        rotation_vectors = ([0.0, 1.0, 0.0],)
+        reference_point = "centroid"
+        rotations_mean = _get_average_rotation(
+            all_disps=all_disps,
+            mesh_file=mesh_file,
+            axes=rotation_vectors,
+            origin=reference_point,
+        )
+
+    else:
+        warnings.warn(f"Output processing not implemented for solver option {solver}.")
+
+    outputs = {"Ux": v_mean[0], "Uy": v_mean[1], "Uz": v_mean[2], "Ry": rotations_mean[0]}
+
+    return outputs
 
 
 ########### Private functions that do not get called directly
@@ -335,9 +380,108 @@ def _get_ccx_composite_shell_props(plies=None, orientations=None, layup=None):
 
 
 def _file_find_replace(file, find: str, replace_with: str):
-    # TODO implement this
-    pass
+    with open(file, "r") as f:
+        contents = f.readlines()
 
+    for index, line in enumerate(contents):
+        if find in line:
+            contents[index] = line.replace(find, replace_with)
+            print(f"Find & Replace edited file '{file}' at line {index:d}.")
+            break
+
+    with open(file, "w") as f:
+        f.write("".join(contents))
+
+
+def _get_from_dat(file, data: str = None):
+    with open(file, "r") as f:
+        contents = f.readlines()
+
+    # extract data assuming this is the only output
+    for index, line in enumerate(contents):
+        if data in line:
+            data_values = contents[index + 2 :]
+            break
+
+    # parse data
+    if data == "displacements":
+        output = np.array(
+            [
+                [float(val) for val in line.strip().split()]
+                for line in data_values
+                if line
+            ],
+            dtype=float,
+        )
+
+    return output
+
+
+def _get_average_rotation(
+    all_disps: np.ndarray = None,
+    mesh_file: str = None,
+    axes: tuple = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    origin="centroid",
+):
+    # for each output node, recover the node undeformed mesh position
+    # node_positions : [nodeid, x, y, z]
+    node_positions = _get_nodes_from_inp(mesh_file, ref_nodes=all_disps[:, 0])
+
+    if origin == "centroid":
+        # centroid position is the average of the undeformed mesh node positions
+        origin_position = np.zeros((3))
+        for axis in range(3):
+            origin_position[axis] = np.average(node_positions[:, axis + 1])
+    elif origin == "analysis_origin":
+        origin_position = np.zeros((3))
+    else:
+        raise ValueError(
+            f"Rotation processing not implemented for option {origin}. Try option='centroid' or 'analysis_origin'."
+        )
+
+    # calculate the approximate rotation from each node
+    rotations = _get_rot_from_disp(all_disps, node_positions, axes, origin_position)
+
+    # average the rotation values
+    rotations_mean = ()
+    # TODO implement
+
+    return rotations_mean
+
+
+def _get_nodes_from_inp(file, ref_nodes=None):
+    with open(file, "r") as f:
+        contents = f.readlines()
+
+    # find node definitions in the file
+    start = None
+    end = None
+    nodes = []
+    for index, line in enumerate(contents):
+        if "*NODE" in line:
+            start = index + 1
+        elif start and "*" in line:  # marks the next keyword
+            end = index - 1
+            break
+        elif start and index >= start:
+            nodes.append(line)
+
+    # parse to array
+    nodes_vals = np.array(
+        [[float(val) for val in line.strip().split(",")] for line in nodes if line],
+        dtype=float,
+    )
+
+    # filter reference nodes
+    if ref_nodes:
+        nodes_vals = np.array(
+            [line for line in nodes_vals if any(line[0] == ref_nodes)], dtype=float
+        )
+
+    return nodes_vals
+
+def _get_rot_from_disp(all_disps, node_positions, axes, origin_position):
+    # TODO implement
 
 if __name__ == "__main__":
     main(INPUTS)
