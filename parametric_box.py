@@ -13,29 +13,56 @@ from scipy.spatial.transform import Rotation
 
 
 # parameters from up-stream processes and analyses
-INPUTS = {
-    "span": 2.0,
-    "chord": 0.2,
-    "airfoil_csv_file": "naca0012.csv",
-    "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
-    "nele_foil": 20,
-    "nele_span": 40,
-    "node_merge_tol": 0.002,
-    "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
-    "cgx_solver": "abq",  # or "nas"
-    "fea_solver": "CALCULIX",  # or "NASTRAN"
-    "composite_plies": [
-        {"id": "p_0", "thickness": 0.0002, "elements": "EL", "orientation": "ORI_0"},
-        {"id": "p_90", "thickness": 0.0002, "elements": "EL", "orientation": "ORI_90"},
-    ],
-    "orientations": [
-        {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
-        {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
-    ],
-    "composite_layup": (["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]),
-    "composite_props_file": "composite_shell.inp",
-    "mesh_file": "all.msh",  # only required if CGX output needs edits
-}
+INPUTS = [
+    {
+        "span": 2.0,
+        "chord": 0.2,
+        "airfoil_csv_file": "naca0012.csv",
+        "analysis_file": "normal_modes.bdf",
+        "nele_foil": 20,
+        "nele_span": 40,
+        "node_merge_tol": 0.002,
+        "cgx_ele_type": 9,  # 9: S4, 10: S8 (linear or quadratic elements)
+        "cgx_solver": "nas",  # or "nas"
+        "fea_solver": "NASTRAN",  # or "NASTRAN"
+        "mesh_file": "all.bdf",
+    },
+    {
+        "span": 2.0,
+        "chord": 0.2,
+        "airfoil_csv_file": "naca0012.csv",
+        "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
+        "nele_foil": 20,
+        "nele_span": 40,
+        "node_merge_tol": 0.002,
+        "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
+        "cgx_solver": "abq",  # or "nas"
+        "fea_solver": "CALCULIX",  # or "NASTRAN"
+        "composite_plies": [
+            {
+                "id": "p_0",
+                "thickness": 0.0002,
+                "elements": "EL",
+                "orientation": "ORI_0",
+            },
+            {
+                "id": "p_90",
+                "thickness": 0.0002,
+                "elements": "EL",
+                "orientation": "ORI_90",
+            },
+        ],
+        "orientations": [
+            {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
+            {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
+        ],
+        "composite_layup": (
+            ["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]
+        ),
+        "composite_props_file": "composite_shell.inp",
+        "mesh_file": "all.msh",
+    },
+]
 
 LOCAL_EXECUTES = {
     "CGX": "wsl /usr/local/bin/cgx_2.15",
@@ -186,19 +213,19 @@ def get_fea_outputs(file, solver, mesh_file):
         # calculate the average rotations
         rotations_mean = _get_average_rotation(all_disps=all_disps, mesh_file=mesh_file)
 
+        outputs = {
+            "Ux": v_mean[0],
+            "Uy": v_mean[1],
+            "Uz": v_mean[2],
+            "Rx": rotations_mean[0],
+            "Ry": rotations_mean[1],
+            "Rz": rotations_mean[2],
+        }
+        return outputs
+
     else:
         warnings.warn(f"Output processing not implemented for solver option {solver}.")
-
-    outputs = {
-        "Ux": v_mean[0],
-        "Uy": v_mean[1],
-        "Uz": v_mean[2],
-        "Rx": rotations_mean[0],
-        "Ry": rotations_mean[1],
-        "Rz": rotations_mean[2],
-    }
-
-    return outputs
+        return {}
 
 
 ########### Private functions that do not get called directly
@@ -514,4 +541,4 @@ def _rotate_vector(angle, starting, axis):
 
 
 if __name__ == "__main__":
-    main(INPUTS)
+    main(INPUTS[0])

@@ -84,5 +84,5 @@ def _plot_study_results(output, x, y):
 
 
 if __name__ == "__main__":
-    parametric_study_material(INPUTS)
-    # parametric_study_mesh(INPUTS)
+    parametric_study_material(INPUTS[1])
+    # parametric_study_mesh(INPUTS[1])
