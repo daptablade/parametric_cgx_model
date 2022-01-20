@@ -1,0 +1,29 @@
+*HEADING
+Model: Cantilevered composite box with tip shear
+**********************
+** NODES AND ELEMENTS
+*INCLUDE,INPUT=all.msh
+**********************
+** COMPOSITE PROPERTIES
+*MATERIAL,NAME=EL
+*ELASTIC, TYPE =ENGINEERING CONSTANTS
+128.0E9,11.0E9,11.0E9,0.28,0.3,0.3,4.5E9,4.5E9,
+4.5E9,20.0
+*DENSITY
+1520.0
+*INCLUDE,INPUT=composite_shell.inp
+**********************
+** BOUNDARY CONDITIONS AND LOAD SET
+*BOUNDARY
+*INCLUDE,INPUT=SPC_123456.bou
+*INCLUDE,INPUT=LAST.nam
+**********************
+*STEP
+*STATIC
+*CLOAD
+NLAST,3,1.0
+*NODE FILE 
+U
+*NODE PRINT,NSET=NLAST
+U
+*END STEP
