@@ -57,13 +57,13 @@ INPUTS = [
             {
                 "id": "p_0",
                 "thickness": 0.0002,
-                "elements": "EL",
+                "material": "EL",
                 "orientation": "ORI_0",
             },
             {
                 "id": "p_90",
                 "thickness": 0.0002,
-                "elements": "EL",
+                "material": "EL",
                 "orientation": "ORI_90",
             },
         ],
@@ -74,6 +74,31 @@ INPUTS = [
         "composite_layup": (
             ["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]
         ),
+        "composite_props_file": "composite_shell.inp",
+        "mesh_file": "all.msh",
+    },
+    {
+        "span": [0.02, 1.96, 0.02],
+        "chord": [0.38, 0.38, 0.38],
+        "filled_sections_flags": [True, False, True],
+        "airfoil_csv_file": "naca0012.csv",
+        "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
+        "nele_foil": 20,
+        "nele_span": [4, 40, 4],
+        "node_merge_tol": 0.002,
+        "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
+        "cgx_solver": "abq",  # or "nas"
+        "fea_solver": "CALCULIX",  # or "NASTRAN"
+        "composite_plies": [
+            {
+                "id": "glass_0",
+                "thickness": 0.0005,
+                "material": "Carbon_ply",
+                "orientation": "ORI_0",
+            },
+        ],
+        "orientations": [{"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]}],
+        "composite_layup": (["glass_0"]),
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
     },
@@ -100,16 +125,16 @@ def main(inputs):
     execute_fea(inputs["analysis_file"], inputs["fea_solver"])
     print("Executed FEM analysis.")
 
-    # recover the analysis results
-    outputs = get_fea_outputs(
-        file=inputs["analysis_file"],
-        solver=inputs["fea_solver"],
-        mesh_file=inputs["mesh_file"],
-    )
-    print(outputs)
+    # # recover the analysis results
+    # outputs = get_fea_outputs(
+    #     file=inputs["analysis_file"],
+    #     solver=inputs["fea_solver"],
+    #     mesh_file=inputs["mesh_file"],
+    # )
+    # print(outputs)
 
     print("End main process.\n")
-    return outputs
+    # return outputs
 
 
 def get_geometry(inputs, plot_flag=False):
@@ -121,7 +146,7 @@ def get_geometry(inputs, plot_flag=False):
     lines = _get_CGX_lines_3D(
         seqa, nele_foil=inputs["nele_foil"], nele_span=inputs["nele_span"]
     )
-    surfs = _get_CGX_surfs_3D()
+    surfs = _get_CGX_surfs_3D(inputs["span"])
 
     return {
         "aerofoil": aerofoil,
@@ -288,23 +313,35 @@ def _get_CGX_points_3D(aerofoil, chord, span):
 
     seqa = []
 
-    x = aerofoil["coordinates"][:, 0] * chord
-    z = aerofoil["coordinates"][:, 1] * chord
+    if not isinstance(span, list):
+        span = [span]
+    if not isinstance(chord, list):
+        chord = [chord]
 
-    # wing root
-    y_root = np.zeros(x.size)
+    starting_y = 0
+    pt_counter = 0
+    for section_index, length_y in enumerate(span):
 
-    # wing tip
-    y_tip = np.ones(x.size) * span
+        x = aerofoil["coordinates"][:, 0] * chord[section_index]
+        z = aerofoil["coordinates"][:, 1] * chord[section_index]
 
-    points = np.vstack([x, y_root, z]).T
-    points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
+        if section_index == 0:  # only needed at the root of the wing
+            y_root = np.ones(x.size) * starting_y
+            points = np.vstack([x, y_root, z]).T
 
-    # SEQA entries list all point IDS on the spline except for the
-    # start and end points
-    indices = np.arange(1, x.size - 1)
-    seqa.append(indices)
-    seqa.append(indices + x.size)
+        # section tip
+        y_tip = np.ones(x.size) * (starting_y + length_y)
+        points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
+
+        # SEQA entries list all point IDS on the spline except for the
+        # start and end points
+        indices = np.arange(pt_counter + 1, pt_counter + x.size - 1)
+        seqa.append(indices)
+        if section_index == 0:  # only needed at the root of the wing
+            seqa.append(indices + x.size)
+
+        starting_y += length_y
+        pt_counter = seqa[-1][-1] + 2
 
     return points, seqa
 
@@ -315,22 +352,51 @@ def _get_CGX_lines_3D(seqa, nele_foil=20, nele_span=40):
     nele_multiplier = 2  # =2 to account for quadratic elements
     lines = []
 
+    if not isinstance(nele_span, list):
+        nele_span = [nele_span]
+
     # aerofoil lines
     for id, seq in enumerate(seqa):
         lines.append([seq[0] - 1, seq[-1] + 1, id, nele_foil * nele_multiplier])
 
-    # spanwise lines at trailing edge
-    lines.append([seqa[0][0] - 1, seqa[1][0] - 1, nele_span * nele_multiplier])
-    lines.append([seqa[0][-1] + 1, seqa[1][-1] + 1, nele_span * nele_multiplier])
+        # spanwise lines at trailing edge
+        if id > 0:
+            lines.append(
+                [
+                    seqa[id - 1][0] - 1,
+                    seqa[id][0] - 1,
+                    nele_span[id - 1] * nele_multiplier,
+                ]
+            )
+            lines.append(
+                [
+                    seqa[id - 1][-1] + 1,
+                    seqa[id][-1] + 1,
+                    nele_span[id - 1] * nele_multiplier,
+                ]
+            )
 
     return lines
 
 
-def _get_CGX_surfs_3D():
+def _get_CGX_surfs_3D(span):
+
+    if not isinstance(span, list):
+        span = [span]
+    number_of_surfs = len(span)
 
     surfaces = []
-    # wing outer surface
-    surfaces.append([0, 3, -1, -2])
+    base_order = [0, 3, -1, -2]  # then [1,6,-4,-5], [4,9,-7,-8] ...
+    # wing surfaces
+    for section_index, surf in enumerate(range(number_of_surfs)):
+        if section_index == 0:
+            surfaces.append(base_order)
+        elif section_index == 1:
+            surfaces.append(
+                [1] + [(id + 3 if id > 0 else id - 3) for id in base_order[1:]]
+            )
+        else:
+            surfaces.append([(id + 3 if id > 0 else id - 3) for id in surfaces[-1]])
 
     return surfaces
 
@@ -427,7 +493,7 @@ def _get_ccx_composite_shell_props(plies=None, orientations=None, layup=None):
     for ply in layup:
         props = [p for p in plies if p["id"] == ply][0]
         commands.append(
-            f"{props['thickness']:6f},,{props['elements']},{props['orientation']}\n"
+            f"{props['thickness']:6f},,{props['material']},{props['orientation']}\n"
         )
 
     return commands
@@ -559,4 +625,4 @@ def _rotate_vector(angle, starting, axis):
 
 
 if __name__ == "__main__":
-    main(INPUTS[0])
+    main(INPUTS[2])
