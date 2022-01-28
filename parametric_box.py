@@ -14,6 +14,8 @@ choose between
 """
 
 # import external libraries
+from audioop import reverse
+from math import ceil
 import warnings
 import numpy as np
 import csv
@@ -82,6 +84,7 @@ INPUTS = [
         "chord": [0.38, 0.38, 0.38],
         "filled_sections_flags": [True, False, True],
         "airfoil_csv_file": "naca0012.csv",
+        "airfoil_cut_chord_percentages": [5, 95],
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
         "nele_foil": 20,
         "nele_span": [4, 40, 4],
@@ -111,7 +114,7 @@ def main(inputs):
     print("The parametric inputs are:")
     print(inputs)
 
-    geometry = get_geometry(inputs, plot_flag=False)
+    geometry = get_geometry(inputs, plot_flag=True)
     infile = get_CGX_input_file(geometry, inputs)
     print(f"Created cgx input file {infile}.")
 
@@ -141,10 +144,22 @@ def get_geometry(inputs, plot_flag=False):
     """Translate parameters into geometry description that CGX can understand,
     that's points, lines and surfaces."""
 
-    aerofoil = _get_aerofoil_from_file(inputs["airfoil_csv_file"], plot_flag=plot_flag)
-    points, seqa = _get_CGX_points_3D(aerofoil, inputs["chord"], inputs["span"])
+    if "airfoil_cut_chord_percentages" not in inputs:
+        inputs["airfoil_cut_chord_percentages"] = None
+
+    aerofoil = _get_aerofoil_from_file(
+        inputs["airfoil_csv_file"],
+        plot_flag=plot_flag,
+        splitpc=inputs["airfoil_cut_chord_percentages"],
+    )
+    points, seqa, split_points = _get_CGX_points_3D(
+        aerofoil, inputs["chord"], inputs["span"]
+    )
     lines = _get_CGX_lines_3D(
-        seqa, nele_foil=inputs["nele_foil"], nele_span=inputs["nele_span"]
+        seqa,
+        nele_foil=inputs["nele_foil"],
+        nele_span=inputs["nele_span"],
+        split_points=split_points,
     )
     surfs = _get_CGX_surfs_3D(inputs["span"])
 
@@ -274,7 +289,7 @@ def get_fea_outputs(file, solver, mesh_file):
 ########### Private functions that do not get called directly
 
 
-def _get_aerofoil_from_file(file, plot_flag=True):
+def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=4):
     """
     This function reads an aerofoil geometry from csv and calculates tc_max.
 
@@ -298,55 +313,191 @@ def _get_aerofoil_from_file(file, plot_flag=True):
     # replace the last coordinate to close the airfoil at the trailing-edge
     coordinates[-1] = coordinates[0]
 
-    if plot_flag == 1:
+    splits = []
+    if splitpc:
+        # check that there are enough points to split the section
+        min_points = 100
+        if len(coordinates) < min_points:
+            raise ValueError(
+                f"The parameter 'airfoil_cut_chord_percentages' requires at least {min_points:d} airfoil spline points in 'airfoil_csv_file'"
+            )
+
+        # re-order the pc from TE to LE
+        splitpc.sort(reverse=True)
+
+        # we assume that there is a [0.0, 0.0] point in the airfoil
+        LE_index = np.where(coordinates[:, 0] == 0.0)[0][0]
+        # trim points that are within min number of points form leading or trailing edge
+        trimmed_coords = np.hstack(
+            [np.array([np.arange(len(coordinates))]).T, coordinates]
+        )
+        trimmed_coords = np.vstack(
+            [
+                trimmed_coords[pt_offset : int(LE_index - ceil(pt_offset / 2)), :],
+                trimmed_coords[int(LE_index + ceil(pt_offset / 2)) : -pt_offset, :],
+            ]
+        )
+        # find two points that match the percentage chord closely
+        for split_number, split in enumerate(splitpc):
+            point_distances_x = np.abs(trimmed_coords[:, 1] - split / 100)
+            pt = {"top": 0, "bot": 0}
+            dist_top = point_distances_x[0]
+            dist_bot = point_distances_x[-1]
+            for index, dist in enumerate(point_distances_x):
+                if dist < dist_top and trimmed_coords[index, 2] > 0:
+                    pt["top"] = int(trimmed_coords[index, 0])
+                    dist_top = dist
+                if dist < dist_bot and trimmed_coords[index, 2] < 0:
+                    pt["bot"] = int(trimmed_coords[index, 0])
+                    dist_bot = dist
+
+            if split_number >= 1:
+                # check number of points separating splits
+                if (
+                    np.abs(pt["top"] - splits[-1]["top"]) < pt_offset
+                    or np.abs(pt["bot"] - splits[-1]["bot"]) < pt_offset
+                ):
+                    raise ValueError(
+                        f"Values {splitpc[split_number-1]} and {split:f} in 'airfoil_cut_chord_percentages' are too close together."
+                    )
+            splits.append(pt)
+
+    if plot_flag:
         plt.plot(coordinates[:, 0], coordinates[:, 1], "-xr")
+        if splitpc:
+            for split in splits:
+                plt.plot(
+                    [coordinates[split["top"], 0], coordinates[split["bot"], 0]],
+                    [coordinates[split["top"], 1], coordinates[split["bot"], 1]],
+                    "-b",
+                )
         plt.xlabel("x")
         plt.ylabel("y")
         plt.title(name)
         plt.show()
 
-    return dict(name=name, coordinates=coordinates)
+    return dict(name=name, coordinates=coordinates, splits=splits)
 
 
 def _get_CGX_points_3D(aerofoil, chord, span):
     """This function generates the CGX input file points and point sequences."""
-
-    seqa = []
 
     if not isinstance(span, list):
         span = [span]
     if not isinstance(chord, list):
         chord = [chord]
 
-    starting_y = 0
-    pt_counter = 0
-    for section_index, length_y in enumerate(span):
+    def simple_wing(aerofoil, chord, span):
+        seqa = []
+        starting_y = 0
+        pt_counter = 0
+        for section_index, length_y in enumerate(span):
 
-        x = aerofoil["coordinates"][:, 0] * chord[section_index]
-        z = aerofoil["coordinates"][:, 1] * chord[section_index]
+            x = aerofoil["coordinates"][:, 0] * chord[section_index]
+            z = aerofoil["coordinates"][:, 1] * chord[section_index]
 
-        if section_index == 0:  # only needed at the root of the wing
-            y_root = np.ones(x.size) * starting_y
-            points = np.vstack([x, y_root, z]).T
+            if section_index == 0:  # only needed at the root of the wing
+                y_root = np.ones(x.size) * starting_y
+                points = np.vstack([x, y_root, z]).T
 
-        # section tip
-        y_tip = np.ones(x.size) * (starting_y + length_y)
-        points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
+            # section tip
+            y_tip = np.ones(x.size) * (starting_y + length_y)
+            points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
 
-        # SEQA entries list all point IDS on the spline except for the
-        # start and end points
-        indices = np.arange(pt_counter + 1, pt_counter + x.size - 1)
-        seqa.append(indices)
-        if section_index == 0:  # only needed at the root of the wing
-            seqa.append(indices + x.size)
+            # SEQA entries list all point IDS on the spline except for the
+            # start and end points
+            indices = np.arange(pt_counter + 1, pt_counter + x.size - 1)
+            seqa.append(indices)
+            if section_index == 0:  # only needed at the root of the wing
+                seqa.append(indices + x.size)
 
-        starting_y += length_y
-        pt_counter = seqa[-1][-1] + 2
+            starting_y += length_y
+            pt_counter = seqa[-1][-1] + 2
 
-    return points, seqa
+            return points, seqa
+
+    def wing_with_splits(aerofoil, chord, span):
+        seqa = []
+        starting_y = 0
+        pt_counter = 0
+        split_points = np.empty((len(aerofoil["splits"]), 2, 0), dtype=int)
+        for section_index, length_y in enumerate(span):
+
+            x = aerofoil["coordinates"][:, 0] * chord[section_index]
+            z = aerofoil["coordinates"][:, 1] * chord[section_index]
+
+            if section_index == 0:  # only needed at the root of the wing
+                y_root = np.ones(x.size) * starting_y
+                points = np.vstack([x, y_root, z]).T
+
+            # section tip
+            y_tip = np.ones(x.size) * (starting_y + length_y)
+            points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
+
+            def airfoil_SEQA(pt_counter, seqa, all_split_points):
+                # SEQA for first airfoil top splines
+                pt = 0
+                split_points = []
+                for split in aerofoil["splits"]:
+                    indices = np.arange(pt_counter + pt + 1, pt_counter + split["top"])
+                    seqa.append(indices)
+                    pt = split["top"]
+                    split_points.append(pt_counter + split["top"])
+                # SEQA for first airfoil LE spline
+                seqa.append(
+                    np.arange(
+                        pt_counter + pt + 1,
+                        pt_counter + aerofoil["splits"][-1]["bot"],
+                    )
+                )
+                # SEQA for first airfoil bot spline
+                pt = x.size - 1
+                bot_seqa = []
+                for split in aerofoil["splits"]:
+                    indices = np.flipud(
+                        np.arange(pt_counter + pt - 1, pt_counter + split["bot"], -1)
+                    )
+                    bot_seqa.append(indices)
+                    pt = split["bot"]
+                    split_points.append(pt_counter + split["bot"])
+                bot_seqa.reverse()
+                seqa += bot_seqa
+                # all_split_point is nested list of dim 3: aerofoil -> split -> point
+                all_split_points = np.dstack(
+                    [
+                        all_split_points,
+                        np.reshape(split_points, (len(aerofoil["splits"]), 2)).T,
+                    ]
+                )
+                return seqa, all_split_points
+
+            seqa, split_points = airfoil_SEQA(
+                pt_counter=pt_counter, seqa=seqa, all_split_points=split_points
+            )
+            if section_index == 0:  # only needed at the root of the wing
+                seqa, split_points = airfoil_SEQA(
+                    pt_counter=pt_counter + x.size + 1,
+                    seqa=seqa,
+                    all_split_points=split_points,
+                )
+
+            starting_y += length_y
+            pt_counter = seqa[-1][-1] + 2
+
+        return points, seqa, split_points
+
+    if "splits" not in aerofoil:
+        points, seqa = simple_wing(aerofoil, chord, span)
+        split_points = None
+    else:
+        points, seqa, split_points = wing_with_splits(aerofoil, chord, span)
+
+    return points, seqa, split_points
 
 
-def _get_CGX_lines_3D(seqa, nele_foil=20, nele_span=40):
+def _get_CGX_lines_3D(
+    seqa, nele_foil=20, nele_span=40, nele_split=4, split_points=None
+):
     """This function creates the aerofoil section splines and the spanwise bounding lines in CGX."""
 
     nele_multiplier = 2  # =2 to account for quadratic elements
@@ -355,26 +506,48 @@ def _get_CGX_lines_3D(seqa, nele_foil=20, nele_span=40):
     if not isinstance(nele_span, list):
         nele_span = [nele_span]
 
+    splits = 0
+    seqas_per_aerofoil = 1
+    if isinstance(split_points, np.ndarray):
+        splits = split_points.shape[0]
+        seqas_per_aerofoil = splits * 2 + 1
+
     # aerofoil lines
+    airfoil_index = 0
     for id, seq in enumerate(seqa):
-        lines.append([seq[0] - 1, seq[-1] + 1, id, nele_foil * nele_multiplier])
+        lines.append(
+            [
+                seq[0] - 1,
+                seq[-1] + 1,
+                id + splits * airfoil_index,
+                nele_foil * nele_multiplier,
+            ]
+        )
 
         # spanwise lines at trailing edge
-        if id > 0:
+        if airfoil_index > 0:
             lines.append(
                 [
-                    seqa[id - 1][0] - 1,
+                    seqa[id - seqas_per_aerofoil][0] - 1,
                     seqa[id][0] - 1,
-                    nele_span[id - 1] * nele_multiplier,
+                    nele_span[airfoil_index - 1] * nele_multiplier,
                 ]
             )
             lines.append(
                 [
-                    seqa[id - 1][-1] + 1,
+                    seqa[id - seqas_per_aerofoil][-1] + 1,
                     seqa[id][-1] + 1,
-                    nele_span[id - 1] * nele_multiplier,
+                    nele_span[airfoil_index - 1] * nele_multiplier,
                 ]
             )
+
+        if isinstance(split_points, np.ndarray) and (id + 1) % seqas_per_aerofoil == 0:
+            for split in split_points[:, :, airfoil_index]:
+
+                # aerofoil split lines
+                lines.append([split[0], split[1], nele_split * nele_multiplier])
+
+            airfoil_index += 1
 
     return lines
 
