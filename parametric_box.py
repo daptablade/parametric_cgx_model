@@ -91,7 +91,7 @@ INPUTS = [
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
         "nele_foil": [4, 10, 4, 10, 4],
         "nele_span": [4, 40, 4],
-        "node_merge_tol": 0.0002,
+        "node_merge_tol": 0.00002,
         "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
         "cgx_solver": "abq",  # or "nas"
         "fea_solver": "CALCULIX",  # or "NASTRAN"

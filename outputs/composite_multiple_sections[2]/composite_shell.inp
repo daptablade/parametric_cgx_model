@@ -1,0 +1,5 @@
+*ORIENTATION,NAME=ORI_0
+0.0, 1.0, 0.0, -1.0, 0.0, 0.0
+** =============== 
+*SHELL SECTION,ELSET=SURF,COMPOSITE
+0.000500,,Carbon_ply,ORI_0
