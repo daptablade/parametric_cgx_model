@@ -158,11 +158,12 @@ def get_geometry(inputs, plot_flag=False):
     points, seqa, split_points = _get_CGX_points_3D(
         aerofoil, inputs["chord"], inputs["span"]
     )
-    lines, surfs = _get_CGX_lines_3D(
+    lines, surfs, bodies = _get_CGX_lines_3D(
         seqa,
         nele_foil=inputs["nele_foil"],
         nele_span=inputs["nele_span"],
         split_points=split_points,
+        filled_sections=inputs["filled_sections_flags"],
     )
 
     return {
@@ -171,6 +172,7 @@ def get_geometry(inputs, plot_flag=False):
         "point_seqa": seqa,
         "lines": lines,
         "surfaces": surfs,
+        "bodies": bodies,
     }
 
 
@@ -213,11 +215,27 @@ def get_composite_properties_input(inputs):
             file=inputs["mesh_file"], find=str_find, replace_with=str_replace
         )
 
+        shell_set_name = None
+        if "filled_sections_flags" in inputs and any(inputs["filled_sections_flags"]):
+            # create separate element sets for shells and solids
+            shell_set_name = "SURF"
+            str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
+            str_replace = "*ELEMENT, TYPE=S8R, ELSET=SURF"
+            _file_find_replace(
+                file=inputs["mesh_file"], find=str_find, replace_with=str_replace
+            )
+            str_find = "*ELEMENT, TYPE=C3D20, ELSET=Eall"
+            str_replace = "*ELEMENT, TYPE=C3D20, ELSET=CORE"
+            _file_find_replace(
+                file=inputs["mesh_file"], find=str_find, replace_with=str_replace
+            )
+
         # get input file cards for this solver
         ccx_commands = _get_ccx_composite_shell_props(
             plies=inputs["composite_plies"],
             orientations=inputs["orientations"],
             layup=inputs["composite_layup"],
+            shell_set_name=shell_set_name,
         )
     else:
         warnings.warn(
@@ -500,7 +518,12 @@ def _get_CGX_points_3D(aerofoil, chord, span):
 
 
 def _get_CGX_lines_3D(
-    seqa, nele_foil=20, nele_span=40, nele_split=4, split_points=None
+    seqa,
+    nele_foil=20,
+    nele_span=40,
+    nele_split=4,
+    split_points=None,
+    filled_sections=None,
 ):
     """This function creates the aerofoil section splines and the spanwise bounding lines in CGX."""
 
@@ -514,6 +537,9 @@ def _get_CGX_lines_3D(
 
     if not isinstance(nele_foil, list):
         nele_foil = [nele_foil]
+
+    if not isinstance(filled_sections, list):
+        filled_sections = [filled_sections]
 
     splits = 0
     seqas_per_aerofoil = 1
@@ -600,9 +626,15 @@ def _get_CGX_lines_3D(
     ), "something has gone wrong in the line definition."
 
     # surfaces
-    surfaces = aero_surfaces + rib_surfaces
+    surfaces = rib_surfaces + aero_surfaces
 
-    return lines, surfaces
+    # solid bodies
+    bodies = []
+    for id, surf in enumerate(rib_surfaces[1:]):
+        if filled_sections[id]:
+            bodies.append([id, id + 1])
+
+    return lines, surfaces, bodies
 
 
 def _get_commands(
@@ -654,6 +686,11 @@ def _get_commands(
         )
 
     commands.append("# =============== \n")
+    # bodies
+    for id, body in enumerate(geometry["bodies"]):
+        commands.append(f"BODY B{id:05d} V{body[0]:05d} V{body[1]:05d}" + "\n")
+
+    commands.append("# =============== \n")
     # SPC and load sets
     if fix_lines:
         commands.append(
@@ -668,6 +705,12 @@ def _get_commands(
     # surface meshes
     for id, _ in enumerate(geometry["surfaces"]):
         commands.append(f"MSHP V{id:05d} s {cgx_ele_type:d} 0 1.000000e+00\n")
+
+    commands.append("# =============== \n")
+    # body meshes
+    if geometry["bodies"]:
+        for id, _ in enumerate(geometry["bodies"]):
+            commands.append(f"MSHP B{id:05d} b 4 0 1.000000e+00\n")
 
     commands.append("# =============== \n")
     # custom export statement
@@ -686,9 +729,13 @@ def _get_commands(
     return commands
 
 
-def _get_ccx_composite_shell_props(plies=None, orientations=None, layup=None):
+def _get_ccx_composite_shell_props(
+    plies=None, orientations=None, layup=None, shell_set_name=None
+):
 
     commands = []
+    if not shell_set_name:
+        shell_set_name = "Eall"
 
     # orientation cards
     for ori in orientations:
@@ -697,7 +744,7 @@ def _get_ccx_composite_shell_props(plies=None, orientations=None, layup=None):
 
     commands.append("** =============== \n")
     # shell property
-    commands.append("*SHELL SECTION,ELSET=Eall,COMPOSITE\n")
+    commands.append(f"*SHELL SECTION,ELSET={shell_set_name},COMPOSITE\n")
     for ply in layup:
         props = [p for p in plies if p["id"] == ply][0]
         commands.append(

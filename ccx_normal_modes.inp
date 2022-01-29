@@ -17,6 +17,7 @@ Model: Unsuported composite box normal modes
 *DENSITY
 1390.0
 *INCLUDE,INPUT=composite_shell.inp
+*SOLID SECTION,MATERIAL=Foam,ELSET=CORE
 **********************
 ** BOUNDARY CONDITIONS AND LOAD SET
 ** *BOUNDARY
