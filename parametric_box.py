@@ -14,7 +14,6 @@ choose between
 """
 
 # import external libraries
-from audioop import reverse
 from math import ceil
 import warnings
 import numpy as np
@@ -83,10 +82,10 @@ INPUTS = [
         "mesh_file": "all.msh",
     },
     {
-        "span": [0.02, 1.96, 0.02],
+        "span": [0.085, 1.83, 0.085],
         "chord": [0.38, 0.38, 0.38],
         "filled_sections_flags": [True, False, True],
-        "airfoil_csv_file": "naca0012.csv",
+        "airfoil_csv_file": "naca4418.csv",
         "airfoil_cut_chord_percentages": [5, 95],
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
         "nele_foil": [4, 10, 4, 10, 4],
@@ -99,7 +98,7 @@ INPUTS = [
             {
                 "id": "glass_0",
                 "thickness": 0.0005,
-                "material": "Carbon_ply",
+                "material": "Glass_ply",
                 "orientation": "ORI_0",
             },
         ],
