@@ -36,6 +36,7 @@ INPUTS = [
     {
         "span": 2.0,
         "chord": 0.2,
+        "filled_sections_flags": False,
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "normal_modes.bdf",
         "nele_foil": 20,
@@ -45,10 +46,12 @@ INPUTS = [
         "cgx_solver": "nas",  # or "nas"
         "fea_solver": "NASTRAN",  # or "NASTRAN"
         "mesh_file": "all.bdf",
+        "boundary_conditions": {"fix_lines": [0], "loaded_lines": None},
     },
     {
         "span": 2.0,
         "chord": 0.2,
+        "filled_sections_flags": False,
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
         "nele_foil": 20,
@@ -75,11 +78,13 @@ INPUTS = [
             {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
             {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
         ],
-        "composite_layup": (
-            ["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]
-        ),
+        "composite_layup": {
+            "aero": (["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]),
+        },
+        "shell_set_name": {"aero": "Eall"},
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
+        "boundary_conditions": {"fix_lines": [0], "loaded_lines": [3]},
     },
     {
         "span": [0.085, 1.83, 0.085],
@@ -113,6 +118,7 @@ INPUTS = [
         "shell_set_name": {"ribs": "ERIBS", "aero": "EAERO"},
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
+        "boundary_conditions": {"fix_lines": None, "loaded_lines": None},
     },
 ]
 
@@ -187,10 +193,12 @@ def get_CGX_input_file(geometry, inputs):
 
     fdb_geom_file = "cgx_infile.fdb"
 
-    fix_lines = None
-    # [0]  # constrain the root of the wing
-    loaded_lines = None
-    # [1]  # apply a shear load at the tip of the wing
+    if "boundary_conditions" in inputs:
+        fix_lines = inputs["boundary_conditions"]["fix_lines"]  # [0] is to fix the root
+        loaded_lines = inputs["boundary_conditions"]["loaded_lines"]
+    else:
+        fix_lines = None
+        loaded_lines = None
 
     # create string of all input commands
     cgx_commands = _get_commands(
@@ -221,10 +229,14 @@ def get_composite_properties_input(inputs):
             file=inputs["mesh_file"], find=str_find, replace_with=str_replace
         )
 
-        shell_set_name = None
+        if "filled_sections_flags" in inputs and not isinstance(
+            inputs["filled_sections_flags"], list
+        ):
+            inputs["filled_sections_flags"] = [inputs["filled_sections_flags"]]
+
+        shell_set_name = inputs["shell_set_name"]
         if "filled_sections_flags" in inputs and any(inputs["filled_sections_flags"]):
             # create separate element sets for shells and solids
-            shell_set_name = inputs["shell_set_name"]
             str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=S8R, ELSET=SURF"
             _file_find_replace(
@@ -514,7 +526,7 @@ def _get_CGX_points_3D(aerofoil, chord, span):
 
         return points, seqa, split_points
 
-    if "splits" not in aerofoil:
+    if not aerofoil["splits"]:
         points, seqa = simple_wing(aerofoil, chord, span)
         split_points = None
     else:
@@ -692,7 +704,7 @@ def _get_commands(
 
     aero_ids = []
     for counter, surf in enumerate(geometry["surfaces"]["aero"]):
-        id = counter + rib_ids[-1] + 1
+        id = counter + (rib_ids[-1] if rib_ids != [] else -1) + 1
         commands.append(
             f"GSUR V{id:05d} + BLEND "
             + " ".join(
@@ -921,4 +933,4 @@ def _rotate_vector(angle, starting, axis):
 
 
 if __name__ == "__main__":
-    main(INPUTS[2])
+    main(INPUTS[1])
