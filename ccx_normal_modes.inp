@@ -23,6 +23,10 @@ Model: Unsuported composite box normal modes
 ** *INCLUDE,INPUT=SPC_123456.bou
 ** *INCLUDE,INPUT=LAST.nam
 **********************
+** ELEMENT SETS
+*INCLUDE,INPUT=RIBS.nam
+*INCLUDE,INPUT=AERO.nam
+**********************
 *STEP
 *STATIC
 *FREQUENCY

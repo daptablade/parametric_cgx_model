@@ -101,9 +101,16 @@ INPUTS = [
                 "material": "Glass_ply",
                 "orientation": "ORI_0",
             },
+            {
+                "id": "dummy",
+                "thickness": 0.00025,
+                "material": "Foam",
+                "orientation": "ORI_0",
+            },
         ],
         "orientations": [{"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]}],
-        "composite_layup": (["glass_0"]),
+        "composite_layup": {"ribs": ["dummy"], "aero": ["glass_0"]},
+        "shell_set_name": {"ribs": "ERIBS", "aero": "EAERO"},
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
     },
@@ -157,7 +164,7 @@ def get_geometry(inputs, plot_flag=False):
     points, seqa, split_points = _get_CGX_points_3D(
         aerofoil, inputs["chord"], inputs["span"]
     )
-    lines, surfs, bodies = _get_CGX_lines_3D(
+    lines, rib_surfaces, aero_surfaces, bodies = _get_CGX_lines_3D(
         seqa,
         nele_foil=inputs["nele_foil"],
         nele_span=inputs["nele_span"],
@@ -170,7 +177,7 @@ def get_geometry(inputs, plot_flag=False):
         "points": points,
         "point_seqa": seqa,
         "lines": lines,
-        "surfaces": surfs,
+        "surfaces": {"ribs": rib_surfaces, "aero": aero_surfaces},
         "bodies": bodies,
     }
 
@@ -217,7 +224,7 @@ def get_composite_properties_input(inputs):
         shell_set_name = None
         if "filled_sections_flags" in inputs and any(inputs["filled_sections_flags"]):
             # create separate element sets for shells and solids
-            shell_set_name = "SURF"
+            shell_set_name = inputs["shell_set_name"]
             str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=S8R, ELSET=SURF"
             _file_find_replace(
@@ -624,16 +631,13 @@ def _get_CGX_lines_3D(
         [line[0] < line[1] for line in lines]
     ), "something has gone wrong in the line definition."
 
-    # surfaces
-    surfaces = rib_surfaces + aero_surfaces
-
     # solid bodies
     bodies = []
     for id, surf in enumerate(rib_surfaces[1:]):
         if filled_sections[id]:
             bodies.append([id, id + 1])
 
-    return lines, surfaces, bodies
+    return lines, rib_surfaces, aero_surfaces, bodies
 
 
 def _get_commands(
@@ -670,7 +674,8 @@ def _get_commands(
 
     commands.append("# =============== \n")
     # surfaces
-    for id, surf in enumerate(geometry["surfaces"]):
+    rib_ids = []
+    for id, surf in enumerate(geometry["surfaces"]["ribs"]):
         commands.append(
             f"GSUR V{id:05d} + BLEND "
             + " ".join(
@@ -683,6 +688,24 @@ def _get_commands(
             )
             + "\n"
         )
+        rib_ids.append(id)
+
+    aero_ids = []
+    for counter, surf in enumerate(geometry["surfaces"]["aero"]):
+        id = counter + rib_ids[-1] + 1
+        commands.append(
+            f"GSUR V{id:05d} + BLEND "
+            + " ".join(
+                [
+                    f"+ L{np.abs(line):05d}"
+                    if np.sign(line) >= 0
+                    else f"- L{np.abs(line):05d}"
+                    for line in surf
+                ]
+            )
+            + "\n"
+        )
+        aero_ids.append(id)
 
     commands.append("# =============== \n")
     # bodies
@@ -702,8 +725,20 @@ def _get_commands(
 
     commands.append("# =============== \n")
     # surface meshes
-    for id, _ in enumerate(geometry["surfaces"]):
+    surfaces = geometry["surfaces"]["ribs"] + geometry["surfaces"]["aero"]
+    for id, _ in enumerate(surfaces):
         commands.append(f"MSHP V{id:05d} s {cgx_ele_type:d} 0 1.000000e+00\n")
+
+    commands.append("")
+    # sets of surfaces
+    if rib_ids:
+        commands.append(
+            f"SETA RIBS s " + " ".join([f"V{id:05d}" for id in rib_ids]) + "\n"
+        )
+    if aero_ids:
+        commands.append(
+            f"SETA AERO s " + " ".join([f"V{id:05d}" for id in aero_ids]) + "\n"
+        )
 
     commands.append("# =============== \n")
     # body meshes
@@ -722,6 +757,12 @@ def _get_commands(
     if loaded_lines:
         commands.append("comp LAST d\n")
         commands.append(f"send LAST {solver} names\n")
+    if rib_ids:
+        commands.append("comp RIBS d\n")
+        commands.append(f"send RIBS {solver} names\n")
+    if aero_ids:
+        commands.append("comp AERO d\n")
+        commands.append(f"send AERO {solver} names\n")
     commands.append(f"send all {solver} \n")
     commands.append("quit\n")
 
@@ -734,7 +775,7 @@ def _get_ccx_composite_shell_props(
 
     commands = []
     if not shell_set_name:
-        shell_set_name = "Eall"
+        shell_set_name = {"ribs": "ERIBS", "aero": "EAERO"}
 
     # orientation cards
     for ori in orientations:
@@ -743,12 +784,13 @@ def _get_ccx_composite_shell_props(
 
     commands.append("** =============== \n")
     # shell property
-    commands.append(f"*SHELL SECTION,ELSET={shell_set_name},COMPOSITE\n")
-    for ply in layup:
-        props = [p for p in plies if p["id"] == ply][0]
-        commands.append(
-            f"{props['thickness']:6f},,{props['material']},{props['orientation']}\n"
-        )
+    for (key, section_name) in shell_set_name.items():
+        commands.append(f"*SHELL SECTION,ELSET={section_name},COMPOSITE\n")
+        for ply in layup[key]:
+            props = [p for p in plies if p["id"] == ply][0]
+            commands.append(
+                f"{props['thickness']:6f},,{props['material']},{props['orientation']}\n"
+            )
 
     return commands
 
