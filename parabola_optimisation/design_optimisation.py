@@ -130,7 +130,7 @@ def main(inputs):
     for component in inputs["components"]:
         prob.model.add_subsystem(
             component["name"],
-            component_lookup[component["name"]](eval(component["init"])),
+            component_lookup[component["name"]](*eval(component["init"])),
         )
 
     # 2) define the internal component connections => none here
@@ -170,7 +170,7 @@ def main(inputs):
 
     # execute the optimisation
     prob.setup()
-    om.n2(prob, outfile="n2.html") # visualise the n2 diagram   
+    om.n2(prob, outfile="n2.html")  # visualise the n2 diagram
     print("=== optimisation started ===")
     prob.run_driver()
     print("=== optimisation stopped ===")

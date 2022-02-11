@@ -20,7 +20,7 @@ def parametric_study_material(inputs):
     """Parametric study exploring the effect of material properties on model deflections."""
 
     study_results = []
-    params = [0, 10, 20, 30, 45]  # rotation_angles, deg
+    params = [-30, -10, 0, 10, 30]  # rotation_angles, deg
 
     for iteration, param_value in enumerate(params):
         print(f"Parametric study iteration {iteration}.")
