@@ -39,14 +39,14 @@ INPUTS = [
         "filled_sections_flags": False,
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "normal_modes.bdf",
-        "nele_foil": 20,
+        "nele_foil": [10, 10],
         "nele_span": 40,
         "node_merge_tol": 0.002,
         "cgx_ele_type": 9,  # 9: S4, 10: S8 (linear or quadratic elements)
         "cgx_solver": "nas",  # or "nas"
         "fea_solver": "NASTRAN",  # or "NASTRAN"
         "mesh_file": "all.bdf",
-        "boundary_conditions": {"fix_lines": [0], "loaded_lines": None},
+        "boundary_conditions": {"fix_lines": [0, 1], "loaded_lines": None},
         "process_flags": {"run_post": False},
     },
     {
@@ -55,7 +55,7 @@ INPUTS = [
         "filled_sections_flags": False,
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
-        "nele_foil": 20,
+        "nele_foil": [10, 10],
         "nele_span": 40,
         "node_merge_tol": 0.002,
         "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
@@ -85,7 +85,7 @@ INPUTS = [
         "shell_set_name": {"aero": "Eall"},
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
-        "boundary_conditions": {"fix_lines": [0], "loaded_lines": [3]},
+        "boundary_conditions": {"fix_lines": [0, 1], "loaded_lines": [5, 6]},
         "process_flags": {"run_post": True},
     },
     {
@@ -95,7 +95,7 @@ INPUTS = [
         "airfoil_csv_file": "naca4418.csv",
         "airfoil_cut_chord_percentages": [5, 95],
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
-        "nele_foil": [4, 10, 4, 10, 4],
+        "nele_foil": [4, 10, 2, 2, 10, 4],
         "nele_span": [4, 40, 4],
         "node_merge_tol": 0.00002,
         "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
@@ -174,7 +174,7 @@ def get_geometry(inputs, plot_flag=False):
     points, seqa, split_points = _get_CGX_points_3D(
         aerofoil, inputs["chord"], inputs["span"]
     )
-    lines, rib_surfaces, aero_surfaces, bodies = _get_CGX_lines_3D(
+    lines, rib_surfaces, aero_surfaces, bodies, aero_surfaces_flip = _get_CGX_lines_3D(
         seqa,
         nele_foil=inputs["nele_foil"],
         nele_span=inputs["nele_span"],
@@ -187,7 +187,11 @@ def get_geometry(inputs, plot_flag=False):
         "points": points,
         "point_seqa": seqa,
         "lines": lines,
-        "surfaces": {"ribs": rib_surfaces, "aero": aero_surfaces},
+        "surfaces": {
+            "ribs": rib_surfaces,
+            "aero": aero_surfaces,
+            "aero_surfaces_flip": aero_surfaces_flip,
+        },
         "bodies": bodies,
     }
 
@@ -333,7 +337,7 @@ def get_fea_outputs(file, solver, mesh_file):
 ########### Private functions that do not get called directly
 
 
-def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=4):
+def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=6):
     """
     This function reads an aerofoil geometry from csv and calculates tc_max.
 
@@ -357,6 +361,10 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=4):
     # replace the last coordinate to close the airfoil at the trailing-edge
     coordinates[-1] = coordinates[0]
 
+    # we assume that there is a [0.0, 0.0] point in the airfoil
+    LE_index = np.where(coordinates[:, 0] == 0.0)[0][0]
+    leading_edge_pt = LE_index
+
     splits = []
     if splitpc:
         # check that there are enough points to split the section
@@ -369,8 +377,6 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=4):
         # re-order the pc from TE to LE
         splitpc.sort(reverse=True)
 
-        # we assume that there is a [0.0, 0.0] point in the airfoil
-        LE_index = np.where(coordinates[:, 0] == 0.0)[0][0]
         # trim points that are within min number of points form leading or trailing edge
         trimmed_coords = np.hstack(
             [np.array([np.arange(len(coordinates))]).T, coordinates]
@@ -420,7 +426,12 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=4):
         plt.title(name)
         plt.show()
 
-    return dict(name=name, coordinates=coordinates, splits=splits)
+    return dict(
+        name=name,
+        coordinates=coordinates,
+        splits=splits,
+        leading_edge_pt=leading_edge_pt,
+    )
 
 
 def _get_CGX_points_3D(aerofoil, chord, span):
@@ -430,35 +441,6 @@ def _get_CGX_points_3D(aerofoil, chord, span):
         span = [span]
     if not isinstance(chord, list):
         chord = [chord]
-
-    def simple_wing(aerofoil, chord, span):
-        seqa = []
-        starting_y = 0
-        pt_counter = 0
-        for section_index, length_y in enumerate(span):
-
-            x = aerofoil["coordinates"][:, 0] * chord[section_index]
-            z = aerofoil["coordinates"][:, 1] * chord[section_index]
-
-            if section_index == 0:  # only needed at the root of the wing
-                y_root = np.ones(x.size) * starting_y
-                points = np.vstack([x, y_root, z]).T
-
-            # section tip
-            y_tip = np.ones(x.size) * (starting_y + length_y)
-            points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
-
-            # SEQA entries list all point IDS on the spline except for the
-            # start and end points
-            indices = np.arange(pt_counter + 1, pt_counter + x.size - 1)
-            seqa.append(indices)
-            if section_index == 0:  # only needed at the root of the wing
-                seqa.append(indices + x.size)
-
-            starting_y += length_y
-            pt_counter = seqa[-1][-1] + 2
-
-            return points, seqa
 
     def wing_with_splits(aerofoil, chord, span):
         seqa = []
@@ -491,28 +473,47 @@ def _get_CGX_points_3D(aerofoil, chord, span):
                 seqa.append(
                     np.arange(
                         pt_counter + pt + 1,
-                        pt_counter + aerofoil["splits"][-1]["bot"],
+                        pt_counter + aerofoil["leading_edge_pt"],
                     )
                 )
-                # SEQA for first airfoil bot spline
-                pt = x.size - 1
-                bot_seqa = []
-                for split in aerofoil["splits"]:
-                    indices = np.flipud(
-                        np.arange(pt_counter + pt - 1, pt_counter + split["bot"], -1)
+
+                if any(aerofoil["splits"]):
+                    seqa.append(
+                        np.arange(
+                            pt_counter + aerofoil["leading_edge_pt"] + 1,
+                            pt_counter + aerofoil["splits"][-1]["bot"],
+                        )
                     )
-                    bot_seqa.append(indices)
-                    pt = split["bot"]
-                    split_points.append(pt_counter + split["bot"])
-                bot_seqa.reverse()
-                seqa += bot_seqa
-                # all_split_point is nested list of dim 3: aerofoil -> split -> point
-                all_split_points = np.dstack(
-                    [
-                        all_split_points,
-                        np.reshape(split_points, (len(aerofoil["splits"]), 2)).T,
-                    ]
-                )
+                    # SEQA for first airfoil bot spline
+                    pt = x.size - 1
+                    bot_seqa = []
+                    for split in aerofoil["splits"]:
+                        indices = np.flipud(
+                            np.arange(
+                                pt_counter + pt - 1, pt_counter + split["bot"], -1
+                            )
+                        )
+                        bot_seqa.append(indices)
+                        pt = split["bot"]
+                        split_points.append(pt_counter + split["bot"])
+                    bot_seqa.reverse()
+                    seqa += bot_seqa
+                    # all_split_point is nested list of dim 3: aerofoil -> split -> point
+                    all_split_points = np.dstack(
+                        [
+                            all_split_points,
+                            np.reshape(split_points, (len(aerofoil["splits"]), 2)).T,
+                        ]
+                    )
+                else:
+                    seqa.append(
+                        np.arange(
+                            pt_counter + aerofoil["leading_edge_pt"] + 1,
+                            pt_counter + x.size - 2,
+                        )
+                    )
+                    all_split_points = []
+
                 return seqa, all_split_points
 
             seqa, split_points = airfoil_SEQA(
@@ -530,11 +531,7 @@ def _get_CGX_points_3D(aerofoil, chord, span):
 
         return points, seqa, split_points
 
-    if not aerofoil["splits"]:
-        points, seqa = simple_wing(aerofoil, chord, span)
-        split_points = None
-    else:
-        points, seqa, split_points = wing_with_splits(aerofoil, chord, span)
+    points, seqa, split_points = wing_with_splits(aerofoil, chord, span)
 
     return points, seqa, split_points
 
@@ -552,6 +549,7 @@ def _get_CGX_lines_3D(
     nele_multiplier = 2  # =2 to account for quadratic elements
     lines = []
     aero_surfaces = []
+    aero_surfaces_flip = []
     rib_surfaces = []
 
     if not isinstance(nele_span, list):
@@ -564,12 +562,11 @@ def _get_CGX_lines_3D(
         filled_sections = [filled_sections]
 
     splits = 0
-    seqas_per_aerofoil = 1
-    aerofoils = len(seqa)
+    seqas_per_aerofoil = 2
     if isinstance(split_points, np.ndarray):
         splits = split_points.shape[0]
-        seqas_per_aerofoil = splits * 2 + 1
-        aerofoils = int(len(seqa) / seqas_per_aerofoil)
+        seqas_per_aerofoil = splits * 2 + 2
+    aerofoils = int(len(seqa) / seqas_per_aerofoil)
 
     airfoil_index = 0
     lcounter = 0
@@ -630,6 +627,10 @@ def _get_CGX_lines_3D(
                     lcounter += 1
 
                     if te_line_inc < seqas_per_aerofoil:
+                        if te_line_inc < seqas_per_aerofoil / 2:  # top surface
+                            aero_surfaces_flip.append(True)
+                        else:  # bot surface
+                            aero_surfaces_flip.append(False)
                         # prepare aero surfaces definition
                         aero_surfaces.append(
                             [
@@ -653,7 +654,7 @@ def _get_CGX_lines_3D(
         if filled_sections[id]:
             bodies.append([id, id + 1])
 
-    return lines, rib_surfaces, aero_surfaces, bodies
+    return lines, rib_surfaces, aero_surfaces, bodies, aero_surfaces_flip
 
 
 def _get_commands(
@@ -707,6 +708,7 @@ def _get_commands(
         rib_ids.append(id)
 
     aero_ids = []
+    flip_surfaces = []
     for counter, surf in enumerate(geometry["surfaces"]["aero"]):
         id = counter + (rib_ids[-1] if rib_ids != [] else -1) + 1
         commands.append(
@@ -721,6 +723,8 @@ def _get_commands(
             )
             + "\n"
         )
+        if geometry["surfaces"]["aero_surfaces_flip"][counter]:
+            flip_surfaces.append(f"FLIP V{id:05d}" + "\n")
         aero_ids.append(id)
 
     commands.append("# =============== \n")
@@ -767,6 +771,8 @@ def _get_commands(
     commands.append("mesh all\n")
     commands.append(f"merg n all {merge_tol:6f} 'nolock'\n")
     commands.append("comp nodes d\n")
+    if flip_surfaces:
+        commands += flip_surfaces
     if fix_lines:
         commands.append("comp SPC d\n")
         commands.append(f"send SPC {solver} spc 123456\n")
@@ -862,14 +868,14 @@ def _get_average_rotation(
     # node_positions : [nodeid, x, y, z]
     node_positions = _get_nodes_from_inp(mesh_file, ref_nodes=all_disps[:, 0])
 
-    origin_position = np.zeros((3))
+    origin_index = np.where(node_positions[:, 1] == 0.0)[0][0]  # LE
     # calculate the approximate rotation from each node
-    rotations = _get_rot_from_disp(all_disps, node_positions, axes, origin_position)
+    rotations = _get_rot_from_disp(all_disps, node_positions, axes, origin_index)
 
     # average the rotation values
     rotations_mean = np.zeros((3))
-    for rot in range(3):
-        rotations_mean[rot] = np.average(rotations[:, rot])
+    for rot in rotations:
+        rotations_mean[rot] = np.average(rotations[rot])
 
     return rotations_mean
 
@@ -906,25 +912,36 @@ def _get_nodes_from_inp(file, ref_nodes=None):
     return nodes_vals
 
 
-def _get_rot_from_disp(all_disps, node_positions, axes, origin_position):
+def _get_rot_from_disp(all_disps, node_positions, axes, origin_index):
     """Return an array of rotations in radians. Using small deflection assumptions."""
 
-    all_rots = np.zeros((node_positions.shape[0], 3))
+    all_rots = {key: [] for key in range(len(axes))}
+    origin_displacements = all_disps[origin_index, 1:]
+    origin_location = node_positions[origin_index, 1:]
     # loop throught the nodes and y rotation axes
     for index, node in enumerate(node_positions):
         # vector from origin to node position
-        v_op = node[1:] - origin_position
-        for col, axis in enumerate(axes):
-            # calculate local rotation unit vector
-            v_r = np.cross(axis, v_op)
-            v_r = v_r / np.linalg.norm(v_r)
-            # calculate local rotation at the centroid
-            rot = (all_disps[index, 1:] @ v_r) / np.linalg.norm(v_op)
-            if np.abs(rot) >= 1:
-                raise ValueError("Rotation error.")
-            all_rots[index, col] = rot
-
-    all_rots = np.arcsin(all_rots)
+        v_op = node[1:] - origin_location
+        if np.linalg.norm(v_op) > 0:  # skip the origin
+            for col, axis in enumerate(axes):
+                # calculate local rotation unit vector
+                v_r = np.cross(axis, v_op)
+                if np.linalg.norm(v_r) > 0.0:
+                    v_r = v_r / np.linalg.norm(v_r)
+                    d_vect = np.cross(v_r, axis)  # this should already be a unit vector
+                    dist_from_axis = v_op @ d_vect / np.linalg.norm(d_vect)
+                    # calculate local rotation at the centroid
+                    rot = np.arctan(
+                        ((all_disps[index, 1:] - origin_displacements) @ v_r)
+                        / dist_from_axis
+                    )
+                    all_rots[col].append(rot)
+                    if np.abs(rot) >= 1:
+                        raise ValueError("Rotation error.")
+                else:
+                    print(
+                        f"Skip point [{str(node)}] on the local rotation axis {str(axis)}."
+                    )
 
     return all_rots
 
