@@ -47,6 +47,7 @@ INPUTS = [
         "fea_solver": "NASTRAN",  # or "NASTRAN"
         "mesh_file": "all.bdf",
         "boundary_conditions": {"fix_lines": [0], "loaded_lines": None},
+        "process_flags": {"run_post": False},
     },
     {
         "span": 2.0,
@@ -85,6 +86,7 @@ INPUTS = [
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
         "boundary_conditions": {"fix_lines": [0], "loaded_lines": [3]},
+        "process_flags": {"run_post": True},
     },
     {
         "span": [0.085, 1.83, 0.085],
@@ -119,6 +121,7 @@ INPUTS = [
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
         "boundary_conditions": {"fix_lines": None, "loaded_lines": None},
+        "process_flags": {"run_post": False},
     },
 ]
 
@@ -143,16 +146,17 @@ def main(inputs):
     execute_fea(inputs["analysis_file"], inputs["fea_solver"])
     print("Executed FEM analysis.")
 
-    # # recover the analysis results
-    # outputs = get_fea_outputs(
-    #     file=inputs["analysis_file"],
-    #     solver=inputs["fea_solver"],
-    #     mesh_file=inputs["mesh_file"],
-    # )
-    # print(outputs)
+    if inputs["process_flags"]["run_post"]:
+        # recover the analysis results
+        outputs = get_fea_outputs(
+            file=inputs["analysis_file"],
+            solver=inputs["fea_solver"],
+            mesh_file=inputs["mesh_file"],
+        )
+        print(outputs)
+        return outputs
 
     print("End main process.\n")
-    # return outputs
 
 
 def get_geometry(inputs, plot_flag=False):
