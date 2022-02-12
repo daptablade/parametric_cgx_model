@@ -1,0 +1,38 @@
+*HEADING
+Model: Unsuported composite box normal modes
+**********************
+** NODES AND ELEMENTS
+*INCLUDE,INPUT=all.msh
+**********************
+** COMPOSITE PROPERTIES
+*MATERIAL,NAME=Glass_ply
+*ELASTIC, TYPE =ISO
+73.0E9,0.22,20.0
+*DENSITY
+2866.0
+*MATERIAL,NAME=Foam
+*ELASTIC, TYPE =ISO
+66.1E6,0.316,20.0
+*DENSITY
+193.0
+*INCLUDE,INPUT=composite_shell.inp
+*SOLID SECTION,MATERIAL=Foam,ELSET=CORE
+**********************
+** BOUNDARY CONDITIONS AND LOAD SET
+** *BOUNDARY
+** *INCLUDE,INPUT=SPC_123456.bou
+** *INCLUDE,INPUT=LAST.nam
+**********************
+** ELEMENT SETS
+*INCLUDE,INPUT=RIBS.nam
+*INCLUDE,INPUT=AERO.nam
+**********************
+*STEP
+*STATIC
+*FREQUENCY
+10
+*NODE FILE 
+U
+*NODE PRINT,NSET=NLAST
+U
+*END STEP
