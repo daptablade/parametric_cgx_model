@@ -936,8 +936,6 @@ def _get_rot_from_disp(all_disps, node_positions, axes, origin_index):
                         / dist_from_axis
                     )
                     all_rots[col].append(rot)
-                    if np.abs(rot) >= 1:
-                        raise ValueError("Rotation error.")
                 else:
                     print(
                         f"Skip point [{str(node)}] on the local rotation axis {str(axis)}."
