@@ -244,6 +244,12 @@ def get_composite_properties_input(inputs):
 
         shell_set_name = inputs["shell_set_name"]
         if "filled_sections_flags" in inputs and any(inputs["filled_sections_flags"]):
+
+            assert (
+                isinstance(inputs["airfoil_cut_chord_percentages"], list)
+                and len(inputs["airfoil_cut_chord_percentages"]) == 2
+            ), "if 'filled_sections_flags' is switched on, 'airfoil_cut_chord_percentages' should be a list of length 2."
+
             # create separate element sets for shells and solids
             str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=S8R, ELSET=SURF"
