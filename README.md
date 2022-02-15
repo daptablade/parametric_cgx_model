@@ -11,7 +11,7 @@ The script assumes that CalculiX and Nastran are installed and working. Adjust t
 * 16/12/2021: [Parametric FEM model creation with Python and CalculiX GraphiX (cgx)](https://medium.com/daptablog/parametric-fem-model-creation-with-python-and-calculix-graphix-cgx-4b654bb8f33e);
 Corresponding code release: [v0.0.1](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.1)
 * 21/01/2022: [Automated FEM analysis and output processing with Python and CalculiX CrunchiX (ccx)](https://medium.com/daptablog/automated-fem-analysis-and-output-processing-with-python-and-calculix-crunchix-ccx-428d445fb1a) Corresponding code release: [v0.0.2](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.2)
-* 15/02/2022: [Design optimisation in practice with Python, OpenMDAO and Scipy](https://medium.com/daptablog)
+* 15/02/2022: [Design optimisation in practice with Python, OpenMDAO and Scipy](https://medium.com/daptablog/design-optimisation-in-practice-with-python-openmdao-and-scipy-3a7f7ec1ad5b)
 Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.3)
 
 # Quick Start
