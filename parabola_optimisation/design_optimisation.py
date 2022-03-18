@@ -9,8 +9,8 @@ import scipy.optimize.slsqp as scipy_slsqp  # type: ignore
 INPUTS = [
     {
         "components": [
-            {"name": "Paraboloid", "init": "inputs"},
-            {"name": "Constraint", "init": "'g = x + y'"},
+            {"name": "Paraboloid", "init": "(inputs,)"},
+            {"name": "Constraint", "init": "('g = x + y',)"},
         ],
         "input_data": [
             {
@@ -74,7 +74,7 @@ INPUTS = [
             "maxiter": 20,
             "tol": 1e-8,
             "disp": True,
-            "debug_print": [],  # ["desvars", "ln_cons", "nl_cons", "objs", "totals"],
+            "debug_print": ["desvars", "ln_cons", "nl_cons", "objs", "totals"],
         },
     }
 ]
@@ -133,7 +133,7 @@ def main(inputs):
             component_lookup[component["name"]](*eval(component["init"])),
         )
 
-    # 2) define the internal component connections => none here
+    # 2) define the internal component connections
     for connection in inputs["connections"]:
         prob.model.connect(
             connection["origin"] + "." + connection["name_origin"],
@@ -147,14 +147,16 @@ def main(inputs):
     prob.driver.options["tol"] = inputs["optimisation_options"]["tol"]
     prob.driver.options["disp"] = inputs["optimisation_options"]["disp"]
     prob.driver.options["debug_print"] = inputs["optimisation_options"]["debug_print"]
+    # Ask OpenMDAO to finite-difference across the model to compute the gradients for the optimizer
+    prob.model.approx_totals()  # this forces FD gradients
 
-    # add design variables
+    # 4) add design variables
     for var in inputs["input_data"]:
         prob.model.add_design_var(
             f"{var['component']}.{var['name']}", lower=var["lower"], upper=var["upper"]
         )
 
-    # add an objective and constraints
+    # 5) add an objective and constraints
     for var in inputs["output_data"]:
         if var["type"] == "objective":
             prob.model.add_objective(f"{var['component']}.{var['name']}")
@@ -165,10 +167,7 @@ def main(inputs):
                 upper=var["upper"],
             )
 
-    # Ask OpenMDAO to finite-difference across the model to compute the gradients for the optimizer
-    prob.model.approx_totals()  # this forces FD gradients
-
-    # execute the optimisation
+    # 6) execute the optimisation
     prob.setup()
     om.n2(prob, outfile="n2.html")  # visualise the n2 diagram
     print("=== optimisation started ===")

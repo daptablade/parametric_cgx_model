@@ -35,18 +35,18 @@ INPUTS = [
                 "type": "constraint",
                 "name": "Uz",
                 "value": 0.0,
-                "lower": -0.1,
-                "upper": 0.1,
+                "lower": -0.06,
+                "upper": 0.06,
             },
         ],
         "optimisation_options": {
             "optimizer": "SLSQP",
             "maxiter": 20,
-            "tol": 1e-9,
+            "tol": 1e-8,
             "disp": True,
             "debug_print": ["desvars", "ln_cons", "nl_cons", "objs", "totals"],
         },
-        "options": {"show_n2_diagram": False},
+        "options": {"show_n2_diagram": True},
     }
 ]
 
@@ -126,14 +126,18 @@ def main(inputs):
     prob.driver.opt_settings["ftol"] = inputs["optimisation_options"]["tol"]
     prob.driver.opt_settings["disp"] = inputs["optimisation_options"]["disp"]
     prob.driver.options["debug_print"] = inputs["optimisation_options"]["debug_print"]
+    # Ask OpenMDAO to finite-difference across the model to compute the gradients for the optimizer
+    prob.model.approx_totals(
+        method="fd", step=0.1, form="forward", step_calc="abs"
+    )  # this forces FD gradients
 
-    # add design variables
+    # 4) add design variables
     for var in inputs["input_data"]:
         prob.model.add_design_var(
             f"{var['component']}.{var['name']}", lower=var["lower"], upper=var["upper"]
         )
 
-    # add an objective and constraints
+    # 5) add an objective and constraints
     for var in inputs["output_data"]:
         if var["type"] == "objective":
             prob.model.add_objective(f"{var['component']}.{var['name']}")
@@ -144,17 +148,12 @@ def main(inputs):
                 upper=var["upper"],
             )
 
-    # Ask OpenMDAO to finite-difference across the model to compute the gradients for the optimizer
-    prob.model.approx_totals(
-        method="fd", step=0.1, form="forward", step_calc="abs"
-    )  # this forces FD gradients
-
-    # add a data recorder to the optimisation problem
+    # 6) add a data recorder to the optimisation problem
     r = om.SqliteRecorder("problem_recorder.sqlite")
     prob.driver.add_recorder(r)
     prob.driver.recording_options["record_derivatives"] = True
 
-    # execute the optimisation
+    # 7) execute the optimisation
     prob.setup()
     if inputs["options"]["show_n2_diagram"]:
         om.n2(prob, outfile="n2.html")  # visualise the n2 diagram
@@ -240,5 +239,5 @@ def _plot_iteration_histories(inputs_history=None, outputs_history=None):
 
 
 if __name__ == "__main__":
-    main(INPUTS[0])
+    # main(INPUTS[0])
     post_process(INPUTS[0])
