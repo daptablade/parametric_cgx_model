@@ -1,5 +1,7 @@
-numpy
-scipy
+numpy == 1.22.3
+scipy == 1.8.0
 matplotlib
 pytest
-openmdao
+openmdao == 3.16.0
+pylint
+black == 22.1.0

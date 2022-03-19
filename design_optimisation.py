@@ -90,7 +90,9 @@ class ParaBox(om.ExplicitComponent):
                 starting=[0.0, 1.0, 0.0],
                 axis=[0.0, 0.0, 1.0],
             )
-            params["process_flags"]["delete_run_folder"] = self.component_inputs["options"]["delete_run_folders"]
+            params["process_flags"]["delete_run_folder"] = self.component_inputs[
+                "options"
+            ]["delete_run_folders"]
             return parabox.main(params)
 
         computed_data = compute_outputs(self.component_parameters, angle)

@@ -1,10 +1,10 @@
-"""Execute the python script 'parametric_studies.py' and inspect outputs: 
-this script executes multiple iterations of the main() function from parametric_box.py 
-with incremental input changes. Note: Calculix CrunchiX is required for this script and 
+"""Execute the python script 'parametric_studies.py' and inspect outputs:
+this script executes multiple iterations of the main() function from parametric_box.py
+with incremental input changes. Note: Calculix CrunchiX is required for this script and
 the exectuion path needs to be set in LOCAL_EXECUTES in parametric_studies.py.
 
 Choose between: 
->> parametric_study_material(INPUTS[1]) for a composite material design study 
+>> parametric_study_material(INPUTS[1]) for a composite material design study
 >> parametric_study_mesh(INPUTS[1]) for a mesh refinement study
 """
 

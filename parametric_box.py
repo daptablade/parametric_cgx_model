@@ -95,7 +95,7 @@ INPUTS = [
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
         "boundary_conditions": {"fix_lines": [0, 1], "loaded_lines": [5, 6]},
-        "process_flags": {"run_post": True, "delete_run_folder": False}
+        "process_flags": {"run_post": True, "delete_run_folder": False},
     },
     {
         "span": [0.085, 1.83, 0.085],
@@ -145,17 +145,17 @@ def main(inputs):
 
     # create the FEM analysis folder and copy input files into it
     run_folder = _make_analysis_folder(
-        inputs=[inputs["analysis_file"]], 
-        inputs_folder=inputs["inputs_folder"], 
-        outputs_folder=inputs["output_folder"]
-        )
+        inputs=[inputs["analysis_file"]],
+        inputs_folder=inputs["inputs_folder"],
+        outputs_folder=inputs["output_folder"],
+    )
 
     geometry = get_geometry(inputs, plot_flag=PLOT_FLAG)
     infile = get_CGX_input_file(geometry, inputs, run_folder)
     print(f"Created cgx input file {infile}.")
 
     execute_CGX(infile)
-    print(f"Created analysis input files with CGX.")
+    print("Created analysis input files with CGX.")
 
     if "composite_layup" in inputs:
         get_composite_properties_input(inputs, run_folder)
@@ -170,7 +170,7 @@ def main(inputs):
             file=inputs["analysis_file"],
             solver=inputs["fea_solver"],
             mesh_file=inputs["mesh_file"],
-            folder=run_folder
+            folder=run_folder,
         )
         print(outputs)
 
@@ -260,7 +260,9 @@ def get_composite_properties_input(inputs, run_folder):
         str_find = "*ELEMENT, TYPE=S8,"
         str_replace = "*ELEMENT, TYPE=S8R,"
         _file_find_replace(
-            file=(run_folder / inputs["mesh_file"]), find=str_find, replace_with=str_replace
+            file=(run_folder / inputs["mesh_file"]),
+            find=str_find,
+            replace_with=str_replace,
         )
 
         if "filled_sections_flags" in inputs and not isinstance(
@@ -280,12 +282,16 @@ def get_composite_properties_input(inputs, run_folder):
             str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=S8R, ELSET=SURF"
             _file_find_replace(
-                file=(run_folder / inputs["mesh_file"]), find=str_find, replace_with=str_replace
+                file=(run_folder / inputs["mesh_file"]),
+                find=str_find,
+                replace_with=str_replace,
             )
             str_find = "*ELEMENT, TYPE=C3D20, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=C3D20, ELSET=CORE"
             _file_find_replace(
-                file=(run_folder / inputs["mesh_file"]), find=str_find, replace_with=str_replace
+                file=(run_folder / inputs["mesh_file"]),
+                find=str_find,
+                replace_with=str_replace,
             )
 
         # get input file cards for this solver
@@ -306,11 +312,11 @@ def get_composite_properties_input(inputs, run_folder):
 
 
 def execute_CGX(infile):
-    """ Run CGX with the batch input file to generate the mesh output files."""
+    """Run CGX with the batch input file to generate the mesh output files."""
     if LOCAL_EXECUTES["CGX"]:
         subprocess.run(
             LOCAL_EXECUTES["CGX"] + " -bg " + infile.parts[-1],
-            cwd= infile.parent,
+            cwd=infile.parent,
             shell=True,
             check=True,
             capture_output=True,
@@ -320,12 +326,12 @@ def execute_CGX(infile):
 
 
 def execute_fea(file, solver, run_folder):
-    """ Run CGX with the batch input file to generate the mesh output files."""
+    """Run CGX with the batch input file to generate the mesh output files."""
 
     if LOCAL_EXECUTES[solver]:
         subprocess.run(
             LOCAL_EXECUTES[solver] + " " + file,
-            cwd = run_folder,
+            cwd=run_folder,
             shell=True,
             check=True,
             capture_output=True,
@@ -337,7 +343,7 @@ def execute_fea(file, solver, run_folder):
 
 
 def get_fea_outputs(file, solver, mesh_file, folder):
-    """ Recover the analysis outputs and process them for plotting."""
+    """Recover the analysis outputs and process them for plotting."""
 
     if solver == "CALCULIX":
         # read file and recover node displacements
@@ -351,7 +357,9 @@ def get_fea_outputs(file, solver, mesh_file, folder):
             v_mean[disp] = np.average(all_disps[:, disp + 1])
 
         # calculate the average rotations
-        rotations_mean = _get_average_rotation(all_disps=all_disps, mesh_file= folder / mesh_file)
+        rotations_mean = _get_average_rotation(
+            all_disps=all_disps, mesh_file=folder / mesh_file
+        )
 
         outputs = {
             "Ux": v_mean[0],
@@ -984,27 +992,31 @@ def _rotate_vector(angle, starting, axis):
     r = Rotation.from_rotvec(angle * np.array(axis), degrees=True)
     return r.apply(starting)
 
-def _make_analysis_folder(inputs, inputs_folder, outputs_folder, name= None):
 
-    if name ==None:
-        name = datetime.today().strftime('%Y-%m-%d-%H-%M-%S') # basic timestamp
+def _make_analysis_folder(inputs, inputs_folder, outputs_folder, name=None):
+
+    if name == None:
+        name = datetime.today().strftime("%Y-%m-%d-%H-%M-%S")  # basic timestamp
     else:
-        assert isinstance(name,type('')), "name is the output folder name and should be a string."
+        assert isinstance(
+            name, type("")
+        ), "name is the output folder name and should be a string."
         # should also check that no special characters exist in name
 
     # create the folder and copy all inputs into it
     path = Path(outputs_folder, name)
     new_inputs = []
-    try: 
-        os.mkdir(path) 
+    try:
+        os.mkdir(path)
         for input_file in inputs:
             if "." not in input_file:
-                input_file += ".inp" # add extension for calculix files 
-            shutil.copy2(Path(inputs_folder,input_file),path)
-    except OSError as error: 
-        print(error) 
- 
+                input_file += ".inp"  # add extension for calculix files
+            shutil.copy2(Path(inputs_folder, input_file), path)
+    except OSError as error:
+        print(error)
+
     return path
+
 
 if __name__ == "__main__":
     main(INPUTS[1])
