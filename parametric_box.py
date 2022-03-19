@@ -1,15 +1,15 @@
 """
-Parametric shell half-wing model geometry creation and meshing in CGX, 
-followed by FEA analysis (using NASTRAN or CALCULIX). 
+Parametric shell half-wing model geometry creation and meshing in CGX,
+followed by FEA analysis (using NASTRAN or CALCULIX).
 
-The script assumes that CGX, CCX and nastran are installed and working. 
+The script assumes that CGX, CCX and nastran are installed and working.
 Adjust the executable calls as needed in LOCAL_EXECUTES.
-Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses 
-(see References in README file).  
+Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses
+(see References in README file).
 
-Execute the python script 'parametric_box.py' and inspect outputs: 
-choose between 
->> main(INPUT[0]) for a metallic Nastran model 
+Execute the python script 'parametric_box.py' and inspect outputs:
+choose between
+>> main(INPUT[0]) for a metallic Nastran model
 >> main(INPUT[1]) for a composite Calculix model
 >> main(INPUT[2]) for a multisection composite Calculix model with core
 """
@@ -20,12 +20,12 @@ import shutil
 from pathlib import Path
 from math import ceil
 import warnings
-import numpy as np
 import csv
 import subprocess
+from datetime import datetime
+import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
-from datetime import datetime
 
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
@@ -151,10 +151,10 @@ def main(inputs):
     )
 
     geometry = get_geometry(inputs, plot_flag=PLOT_FLAG)
-    infile = get_CGX_input_file(geometry, inputs, run_folder)
+    infile = get_cgx_input_file(geometry, inputs, run_folder)
     print(f"Created cgx input file {infile}.")
 
-    execute_CGX(infile)
+    execute_cgx(infile)
     print("Created analysis input files with CGX.")
 
     if "composite_layup" in inputs:
@@ -197,10 +197,10 @@ def get_geometry(inputs, plot_flag=False):
         plot_flag=plot_flag,
         splitpc=inputs["airfoil_cut_chord_percentages"],
     )
-    points, seqa, split_points = _get_CGX_points_3D(
+    points, seqa, split_points = _get_cgx_points_3d(
         aerofoil, inputs["chord"], inputs["span"]
     )
-    lines, rib_surfaces, aero_surfaces, bodies, aero_surfaces_flip = _get_CGX_lines_3D(
+    lines, rib_surfaces, aero_surfaces, bodies, aero_surfaces_flip = _get_cgx_lines_3d(
         seqa,
         nele_foil=inputs["nele_foil"],
         nele_span=inputs["nele_span"],
@@ -222,7 +222,7 @@ def get_geometry(inputs, plot_flag=False):
     }
 
 
-def get_CGX_input_file(geometry, inputs, folder):
+def get_cgx_input_file(geometry, inputs, folder):
     """Write CGX batch commands to file."""
 
     fdb_geom_file = folder / "cgx_infile.fdb"
@@ -245,7 +245,7 @@ def get_CGX_input_file(geometry, inputs, folder):
     )
 
     # write string of commands to file
-    with open(fdb_geom_file, "w") as f:
+    with open(fdb_geom_file, "w", encoding="utf-8") as f:
         f.write("".join(cgx_commands))
 
     return fdb_geom_file
@@ -276,7 +276,10 @@ def get_composite_properties_input(inputs, run_folder):
             assert (
                 isinstance(inputs["airfoil_cut_chord_percentages"], list)
                 and len(inputs["airfoil_cut_chord_percentages"]) == 2
-            ), "if 'filled_sections_flags' is switched on, 'airfoil_cut_chord_percentages' should be a list of length 2."
+            ), (
+                "if 'filled_sections_flags' is switched on, 'airfoil_cut_chord_percentages'"
+                "should be a list of length 2."
+            )
 
             # create separate element sets for shells and solids
             str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
@@ -307,11 +310,11 @@ def get_composite_properties_input(inputs, run_folder):
         )
 
     # write string of commands to file
-    with open(run_folder / inputs["composite_props_file"], "w") as f:
+    with open(run_folder / inputs["composite_props_file"], "w", encoding="utf-8") as f:
         f.write("".join(ccx_commands))
 
 
-def execute_CGX(infile):
+def execute_cgx(infile):
     """Run CGX with the batch input file to generate the mesh output files."""
     if LOCAL_EXECUTES["CGX"]:
         subprocess.run(
@@ -393,7 +396,7 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=6):
 
     # read aerofoil input file
     airfoil = []
-    with open(file, mode="r") as infile:
+    with open(file, mode="r", encoding="utf-8") as infile:
         reader = csv.reader(infile, skipinitialspace=True)
         for row in reader:
             airfoil.append(row)
@@ -413,7 +416,8 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=6):
         min_points = 100
         if len(coordinates) < min_points:
             raise ValueError(
-                f"The parameter 'airfoil_cut_chord_percentages' requires at least {min_points:d} airfoil spline points in 'airfoil_csv_file'"
+                "The parameter 'airfoil_cut_chord_percentages' requires "
+                f"at least {min_points:d} airfoil spline points in 'airfoil_csv_file'"
             )
 
         # re-order the pc from TE to LE
@@ -450,7 +454,8 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=6):
                     or np.abs(pt["bot"] - splits[-1]["bot"]) < pt_offset
                 ):
                     raise ValueError(
-                        f"Values {splitpc[split_number-1]} and {split:f} in 'airfoil_cut_chord_percentages' are too close together."
+                        f"Values {splitpc[split_number-1]} and {split:f} in "
+                        "'airfoil_cut_chord_percentages' are too close together."
                     )
             splits.append(pt)
 
@@ -476,7 +481,7 @@ def _get_aerofoil_from_file(file, plot_flag=True, splitpc=None, pt_offset=6):
     )
 
 
-def _get_CGX_points_3D(aerofoil, chord, span):
+def _get_cgx_points_3d(aerofoil, chord, span):
     """This function generates the CGX input file points and point sequences."""
 
     if not isinstance(span, list):
@@ -502,7 +507,7 @@ def _get_CGX_points_3D(aerofoil, chord, span):
             y_tip = np.ones(x.size) * (starting_y + length_y)
             points = np.append(points, np.vstack([x, y_tip, z]).T, axis=0)
 
-            def airfoil_SEQA(pt_counter, seqa, all_split_points):
+            def airfoil_seqa(pt_counter, seqa, all_split_points, x_size):
                 # SEQA for first airfoil top splines
                 pt = 0
                 split_points = []
@@ -527,7 +532,7 @@ def _get_CGX_points_3D(aerofoil, chord, span):
                         )
                     )
                     # SEQA for first airfoil bot spline
-                    pt = x.size - 1
+                    pt = x_size - 1
                     bot_seqa = []
                     for split in aerofoil["splits"]:
                         indices = np.flipud(
@@ -551,21 +556,25 @@ def _get_CGX_points_3D(aerofoil, chord, span):
                     seqa.append(
                         np.arange(
                             pt_counter + aerofoil["leading_edge_pt"] + 1,
-                            pt_counter + x.size - 2,
+                            pt_counter + x_size - 2,
                         )
                     )
                     all_split_points = []
 
                 return seqa, all_split_points
 
-            seqa, split_points = airfoil_SEQA(
-                pt_counter=pt_counter, seqa=seqa, all_split_points=split_points
+            seqa, split_points = airfoil_seqa(
+                pt_counter=pt_counter,
+                seqa=seqa,
+                all_split_points=split_points,
+                x_size=x.size,
             )
             if section_index == 0:  # only needed at the root of the wing
-                seqa, split_points = airfoil_SEQA(
+                seqa, split_points = airfoil_seqa(
                     pt_counter=pt_counter + x.size,
                     seqa=seqa,
                     all_split_points=split_points,
+                    x_size=x.size,
                 )
 
             starting_y += length_y
@@ -578,7 +587,7 @@ def _get_CGX_points_3D(aerofoil, chord, span):
     return points, seqa, split_points
 
 
-def _get_CGX_lines_3D(
+def _get_cgx_lines_3d(
     seqa,
     nele_foil=20,
     nele_span=40,
@@ -612,20 +621,20 @@ def _get_CGX_lines_3D(
 
     airfoil_index = 0
     lcounter = 0
-    for id, seq in enumerate(seqa):
+    for seqa_id, seq in enumerate(seqa):
 
         # aerofoil lines
         lines.append(
             [
                 seq[0] - 1,
                 seq[-1] + 1,
-                id,
-                nele_foil[id % seqas_per_aerofoil] * nele_multiplier,
+                seqa_id,
+                nele_foil[seqa_id % seqas_per_aerofoil] * nele_multiplier,
             ]
         )
         lcounter += 1
 
-        if (id + 1) % seqas_per_aerofoil == 0:
+        if (seqa_id + 1) % seqas_per_aerofoil == 0:
 
             if isinstance(split_points, np.ndarray):
                 for split_index, split in enumerate(split_points[:, :, airfoil_index]):
@@ -646,17 +655,17 @@ def _get_CGX_lines_3D(
                         )
 
             # spanwise lines at trailing edge
-            if (id + 1) / seqas_per_aerofoil < aerofoils:
+            if (seqa_id + 1) / seqas_per_aerofoil < aerofoils:
 
                 for te_line_inc in range(seqas_per_aerofoil + 1):
                     if te_line_inc < seqas_per_aerofoil:
-                        start_id = id + 1 - seqas_per_aerofoil + te_line_inc
-                        end_id = id + 1 + te_line_inc
+                        start_id = seqa_id + 1 - seqas_per_aerofoil + te_line_inc
+                        end_id = seqa_id + 1 + te_line_inc
                         side = 0
                         pt_offset = -1
                     else:
-                        start_id = id - seqas_per_aerofoil + te_line_inc
-                        end_id = id + te_line_inc
+                        start_id = seqa_id - seqas_per_aerofoil + te_line_inc
+                        end_id = seqa_id + te_line_inc
                         side = -1
                         pt_offset = 1
                     lines.append(
@@ -692,9 +701,9 @@ def _get_CGX_lines_3D(
 
     # solid bodies
     bodies = []
-    for id, surf in enumerate(rib_surfaces[1:]):
-        if filled_sections[id]:
-            bodies.append([id, id + 1])
+    for surf_id, _ in enumerate(rib_surfaces[1:]):
+        if filled_sections[surf_id]:
+            bodies.append([surf_id, surf_id + 1])
 
     return lines, rib_surfaces, aero_surfaces, bodies, aero_surfaces_flip
 
@@ -706,13 +715,15 @@ def _get_commands(
     commands = []
 
     # points
-    for id, point in enumerate(geometry["points"]):
-        commands.append(f"PNT P{id:05d} {point[0]:e} {point[1]:e} {point[2]:e}\n")
+    for entity_id, point in enumerate(geometry["points"]):
+        commands.append(
+            f"PNT P{entity_id:05d} {point[0]:e} {point[1]:e} {point[2]:e}\n"
+        )
 
     commands.append("# =============== \n")
     # point sequences
-    for id, points in enumerate(geometry["point_seqa"]):
-        commands.append(f"SEQA A{id:05d} pnt ")
+    for entity_id, points in enumerate(geometry["point_seqa"]):
+        commands.append(f"SEQA A{entity_id:05d} pnt ")
         for ii in range(0, len(points), 8):
             line_end = " = \n" if ii + 8 < len(points) else "\n"
             commands.append(
@@ -721,22 +732,22 @@ def _get_commands(
 
     commands.append("# =============== \n")
     # lines
-    for id, line in enumerate(geometry["lines"]):
+    for entity_id, line in enumerate(geometry["lines"]):
         if len(line) == 3:  # straight line
             commands.append(
-                f"LINE L{id:05d} P{line[0]:05d} P{line[1]:05d} {line[2]:d} \n"
+                f"LINE L{entity_id:05d} P{line[0]:05d} P{line[1]:05d} {line[2]:d} \n"
             )
         elif len(line) == 4:  # spline
             commands.append(
-                f"LINE L{id:05d} P{line[0]:05d} P{line[1]:05d} A{line[2]:05d} {line[3]:d} \n"
+                f"LINE L{entity_id:05d} P{line[0]:05d} P{line[1]:05d} A{line[2]:05d} {line[3]:d} \n"
             )
 
     commands.append("# =============== \n")
     # surfaces
     rib_ids = []
-    for id, surf in enumerate(geometry["surfaces"]["ribs"]):
+    for entity_id, surf in enumerate(geometry["surfaces"]["ribs"]):
         commands.append(
-            f"GSUR V{id:05d} + BLEND "
+            f"GSUR V{entity_id:05d} + BLEND "
             + " ".join(
                 [
                     f"+ L{np.abs(line):05d}"
@@ -747,14 +758,14 @@ def _get_commands(
             )
             + "\n"
         )
-        rib_ids.append(id)
+        rib_ids.append(entity_id)
 
     aero_ids = []
     flip_surfaces = []
     for counter, surf in enumerate(geometry["surfaces"]["aero"]):
-        id = counter + (rib_ids[-1] if rib_ids != [] else -1) + 1
+        entity_id = counter + (rib_ids[-1] if rib_ids else -1) + 1
         commands.append(
-            f"GSUR V{id:05d} + BLEND "
+            f"GSUR V{entity_id:05d} + BLEND "
             + " ".join(
                 [
                     f"+ L{np.abs(line):05d}"
@@ -766,47 +777,47 @@ def _get_commands(
             + "\n"
         )
         if geometry["surfaces"]["aero_surfaces_flip"][counter]:
-            flip_surfaces.append(f"FLIP V{id:05d}" + "\n")
-        aero_ids.append(id)
+            flip_surfaces.append(f"FLIP V{entity_id:05d}" + "\n")
+        aero_ids.append(entity_id)
 
     commands.append("# =============== \n")
     # bodies
-    for id, body in enumerate(geometry["bodies"]):
-        commands.append(f"BODY B{id:05d} V{body[0]:05d} V{body[1]:05d}" + "\n")
+    for entity_id, body in enumerate(geometry["bodies"]):
+        commands.append(f"BODY B{entity_id:05d} V{body[0]:05d} V{body[1]:05d}" + "\n")
 
     commands.append("# =============== \n")
     # SPC and load sets
     if fix_lines:
         commands.append(
-            f"SETA SPC l " + " ".join([f"L{line:05d}" for line in fix_lines]) + "\n"
+            "SETA SPC l " + " ".join([f"L{line:05d}" for line in fix_lines]) + "\n"
         )
     if loaded_lines:
         commands.append(
-            f"SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
+            "SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
         )
 
     commands.append("# =============== \n")
     # surface meshes
     surfaces = geometry["surfaces"]["ribs"] + geometry["surfaces"]["aero"]
-    for id, _ in enumerate(surfaces):
-        commands.append(f"MSHP V{id:05d} s {cgx_ele_type:d} 0 1.000000e+00\n")
+    for entity_id, _ in enumerate(surfaces):
+        commands.append(f"MSHP V{entity_id:05d} s {cgx_ele_type:d} 0 1.000000e+00\n")
 
     commands.append("")
     # sets of surfaces
     if rib_ids:
         commands.append(
-            f"SETA RIBS s " + " ".join([f"V{id:05d}" for id in rib_ids]) + "\n"
+            "SETA RIBS s " + " ".join([f"V{id:05d}" for id in rib_ids]) + "\n"
         )
     if aero_ids:
         commands.append(
-            f"SETA AERO s " + " ".join([f"V{id:05d}" for id in aero_ids]) + "\n"
+            "SETA AERO s " + " ".join([f"V{id:05d}" for id in aero_ids]) + "\n"
         )
 
     commands.append("# =============== \n")
     # body meshes
     if geometry["bodies"]:
-        for id, _ in enumerate(geometry["bodies"]):
-            commands.append(f"MSHP B{id:05d} b 4 0 1.000000e+00\n")
+        for entity_id, _ in enumerate(geometry["bodies"]):
+            commands.append(f"MSHP B{entity_id:05d} b 4 0 1.000000e+00\n")
 
     commands.append("# =============== \n")
     # custom export statement
@@ -860,7 +871,7 @@ def _get_ccx_composite_shell_props(
 
 
 def _file_find_replace(file, find: str, replace_with: str):
-    with open(file, "r") as f:
+    with open(file, "r", encoding="utf-8") as f:
         contents = f.readlines()
 
     for index, line in enumerate(contents):
@@ -869,12 +880,12 @@ def _file_find_replace(file, find: str, replace_with: str):
             print(f"Find & Replace edited file '{file}' at line {index:d}.")
             break
 
-    with open(file, "w") as f:
+    with open(file, "w", encoding="utf-8") as f:
         f.write("".join(contents))
 
 
 def _get_from_dat(file, data: str = None):
-    with open(file, "r") as f:
+    with open(file, "r", encoding="utf-8") as f:
         contents = f.readlines()
 
     # extract data assuming this is the only output
@@ -923,18 +934,16 @@ def _get_average_rotation(
 
 
 def _get_nodes_from_inp(file, ref_nodes=None):
-    with open(file, "r") as f:
+    with open(file, "r", encoding="utf-8") as f:
         contents = f.readlines()
 
     # find node definitions in the file
     start = None
-    end = None
     nodes = []
     for index, line in enumerate(contents):
         if "*NODE" in line:
             start = index + 1
         elif start and "*" in line:  # marks the next keyword
-            end = index - 1
             break
         elif start and index >= start:
             nodes.append(line)
@@ -995,7 +1004,7 @@ def _rotate_vector(angle, starting, axis):
 
 def _make_analysis_folder(inputs, inputs_folder, outputs_folder, name=None):
 
-    if name == None:
+    if name is None:
         name = datetime.today().strftime("%Y-%m-%d-%H-%M-%S")  # basic timestamp
     else:
         assert isinstance(
@@ -1005,7 +1014,6 @@ def _make_analysis_folder(inputs, inputs_folder, outputs_folder, name=None):
 
     # create the folder and copy all inputs into it
     path = Path(outputs_folder, name)
-    new_inputs = []
     try:
         os.mkdir(path)
         for input_file in inputs:

@@ -1,10 +1,8 @@
 """ Test functions for parametric_box module."""
 
-import os
-import sys
+from pathlib import Path
 import pytest
 import numpy as np
-from pathlib import Path
 
 from parametric_box import _get_from_dat, _get_average_rotation
 
@@ -32,7 +30,7 @@ _TEST_DATA_FOLDER = Path("test_data")
     ],
 )
 def test_get_average_rotation(cases):
-
+    """Compare calculated rotations to applied rigid body rotations."""
     # read file and recover node displacements
     output_file = str(_TEST_DATA_FOLDER / "rigid_body_rotation" / cases["output_file"])
     # all_disp : [nodeid, vx, vy, vz]

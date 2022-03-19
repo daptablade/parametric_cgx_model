@@ -4,7 +4,6 @@ import numpy as np
 from matplotlib import pyplot as plt  # type: ignore
 
 import openmdao.api as om  # type: ignore
-import scipy.optimize.slsqp as scipy_slsqp  # type: ignore
 
 import parametric_box as parabox
 
@@ -66,9 +65,9 @@ class ParaBox(om.ExplicitComponent):
         inputs = self.component_inputs["input_data"]
         outputs = self.component_inputs["output_data"]
 
-        for input in inputs:
-            if input["component"] == "ParaBox":
-                self.add_input(input["name"], val=input["value"])
+        for item in inputs:
+            if item["component"] == "ParaBox":
+                self.add_input(item["name"], val=item["value"])
 
         for output in outputs:
             if output["component"] == "ParaBox":

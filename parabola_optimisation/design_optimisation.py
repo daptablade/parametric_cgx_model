@@ -1,10 +1,9 @@
-"""Design optimisation module making use of OpenMDAO and Scipy libraries. 
+"""Design optimisation module making use of OpenMDAO and Scipy libraries.
 
 Based on the OpenMDAO "Optimization of Paraboloid" example (accessed 09/02/2022)
 @ https://openmdao.org/newdocs/versions/latest/basic_user_guide/single_disciplinary_optimization/first_optimization.html """
 
 import openmdao.api as om  # type: ignore
-import scipy.optimize.slsqp as scipy_slsqp  # type: ignore
 
 INPUTS = [
     {
@@ -94,9 +93,9 @@ class Paraboloid(om.ExplicitComponent):
         inputs = self.component_inputs["input_data"]
         outputs = self.component_inputs["output_data"]
 
-        for input in inputs:
-            if input["component"] == "Paraboloid":
-                self.add_input(input["name"], val=input["value"])
+        for item in inputs:
+            if item["component"] == "Paraboloid":
+                self.add_input(item["name"], val=item["value"])
 
         for output in outputs:
             if output["component"] == "Paraboloid":
@@ -106,7 +105,7 @@ class Paraboloid(om.ExplicitComponent):
         # Finite difference all partials.
         self.declare_partials("*", "*", method="fd")
 
-    def compute(self, inputs, outputs):
+    def compute(self, inputs, outputs, discrete_inputs=None, discrete_outputs=None):
         """
         f(x,y) = (x-3)^2 + xy + (y+4)^2 - 3
 
@@ -124,6 +123,9 @@ component_lookup = {"Paraboloid": Paraboloid, "Constraint": om.ExecComp}
 
 
 def main(inputs):
+    """
+    Define the optimisation problem and execute the optimisation driver.
+    """
 
     # 1) define the simulation components
     prob = om.Problem()
