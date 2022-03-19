@@ -11,9 +11,13 @@ Execute the python script 'parametric_box.py' and inspect outputs:
 choose between 
 >> main(INPUT[0]) for a metallic Nastran model 
 >> main(INPUT[1]) for a composite Calculix model
+>> main(INPUT[2]) for a multisection composite Calculix model with core
 """
 
 # import external libraries
+import os
+import shutil
+from pathlib import Path
 from math import ceil
 import warnings
 import numpy as np
@@ -21,6 +25,7 @@ import csv
 import subprocess
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
+from datetime import datetime
 
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
@@ -37,6 +42,7 @@ INPUTS = [
         "span": 2.0,
         "chord": 0.2,
         "filled_sections_flags": False,
+        "inputs_folder": "inputs",
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "normal_modes.bdf",
         "nele_foil": [10, 10],
@@ -53,6 +59,7 @@ INPUTS = [
         "span": 2.0,
         "chord": 0.2,
         "filled_sections_flags": False,
+        "inputs_folder": "inputs",
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
         "nele_foil": [10, 10],
@@ -92,6 +99,7 @@ INPUTS = [
         "span": [0.085, 1.83, 0.085],
         "chord": [0.38, 0.38, 0.38],
         "filled_sections_flags": [True, False, True],
+        "inputs_folder": "inputs",
         "airfoil_csv_file": "naca4418.csv",
         "airfoil_cut_chord_percentages": [5, 95],
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
@@ -132,18 +140,21 @@ def main(inputs):
     print("The parametric inputs are:")
     print(inputs)
 
+    # create the FEM analysis folder and copy input files into it
+    run_folder = _make_analysis_folder(inputs=[inputs["analysis_file"]], inputs_folder=inputs["inputs_folder"])
+
     geometry = get_geometry(inputs, plot_flag=PLOT_FLAG)
-    infile = get_CGX_input_file(geometry, inputs)
+    infile = get_CGX_input_file(geometry, inputs, run_folder)
     print(f"Created cgx input file {infile}.")
 
     execute_CGX(infile)
     print(f"Created analysis input files with CGX.")
 
     if "composite_layup" in inputs:
-        get_composite_properties_input(inputs)
+        get_composite_properties_input(inputs, run_folder)
 
     # run the FEM model analysis
-    execute_fea(inputs["analysis_file"], inputs["fea_solver"])
+    execute_fea(inputs["analysis_file"], inputs["fea_solver"], run_folder)
     print("Executed FEM analysis.")
 
     if inputs["process_flags"]["run_post"]:
@@ -152,6 +163,7 @@ def main(inputs):
             file=inputs["analysis_file"],
             solver=inputs["fea_solver"],
             mesh_file=inputs["mesh_file"],
+            folder=run_folder
         )
         print(outputs)
         return outputs
@@ -167,7 +179,7 @@ def get_geometry(inputs, plot_flag=False):
         inputs["airfoil_cut_chord_percentages"] = None
 
     aerofoil = _get_aerofoil_from_file(
-        inputs["airfoil_csv_file"],
+        Path(inputs["inputs_folder"], inputs["airfoil_csv_file"]),
         plot_flag=plot_flag,
         splitpc=inputs["airfoil_cut_chord_percentages"],
     )
@@ -196,10 +208,10 @@ def get_geometry(inputs, plot_flag=False):
     }
 
 
-def get_CGX_input_file(geometry, inputs):
+def get_CGX_input_file(geometry, inputs, folder):
     """Write CGX batch commands to file."""
 
-    fdb_geom_file = "cgx_infile.fdb"
+    fdb_geom_file = folder / "cgx_infile.fdb"
 
     if "boundary_conditions" in inputs:
         fix_lines = inputs["boundary_conditions"]["fix_lines"]  # [0] is to fix the root
@@ -225,7 +237,7 @@ def get_CGX_input_file(geometry, inputs):
     return fdb_geom_file
 
 
-def get_composite_properties_input(inputs):
+def get_composite_properties_input(inputs, run_folder):
     """write an FEA input file with the composite properties."""
 
     if inputs["fea_solver"] == "CALCULIX":
@@ -234,7 +246,7 @@ def get_composite_properties_input(inputs):
         str_find = "*ELEMENT, TYPE=S8,"
         str_replace = "*ELEMENT, TYPE=S8R,"
         _file_find_replace(
-            file=inputs["mesh_file"], find=str_find, replace_with=str_replace
+            file=(run_folder / inputs["mesh_file"]), find=str_find, replace_with=str_replace
         )
 
         if "filled_sections_flags" in inputs and not isinstance(
@@ -254,12 +266,12 @@ def get_composite_properties_input(inputs):
             str_find = "*ELEMENT, TYPE=S8R, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=S8R, ELSET=SURF"
             _file_find_replace(
-                file=inputs["mesh_file"], find=str_find, replace_with=str_replace
+                file=(run_folder / inputs["mesh_file"]), find=str_find, replace_with=str_replace
             )
             str_find = "*ELEMENT, TYPE=C3D20, ELSET=Eall"
             str_replace = "*ELEMENT, TYPE=C3D20, ELSET=CORE"
             _file_find_replace(
-                file=inputs["mesh_file"], find=str_find, replace_with=str_replace
+                file=(run_folder / inputs["mesh_file"]), find=str_find, replace_with=str_replace
             )
 
         # get input file cards for this solver
@@ -275,7 +287,7 @@ def get_composite_properties_input(inputs):
         )
 
     # write string of commands to file
-    with open(inputs["composite_props_file"], "w") as f:
+    with open(run_folder / inputs["composite_props_file"], "w") as f:
         f.write("".join(ccx_commands))
 
 
@@ -283,7 +295,8 @@ def execute_CGX(infile):
     """ Run CGX with the batch input file to generate the mesh output files."""
     if LOCAL_EXECUTES["CGX"]:
         subprocess.run(
-            LOCAL_EXECUTES["CGX"] + " -bg " + infile,
+            LOCAL_EXECUTES["CGX"] + " -bg " + infile.parts[-1],
+            cwd= infile.parts[-2],
             shell=True,
             check=True,
             capture_output=True,
@@ -292,12 +305,13 @@ def execute_CGX(infile):
         raise ValueError("Need to specify an execution path for CalculiX GraphiX.")
 
 
-def execute_fea(file, solver):
+def execute_fea(file, solver, run_folder):
     """ Run CGX with the batch input file to generate the mesh output files."""
 
     if LOCAL_EXECUTES[solver]:
         subprocess.run(
             LOCAL_EXECUTES[solver] + " " + file,
+            cwd = run_folder,
             shell=True,
             check=True,
             capture_output=True,
@@ -308,12 +322,12 @@ def execute_fea(file, solver):
         )
 
 
-def get_fea_outputs(file, solver, mesh_file):
+def get_fea_outputs(file, solver, mesh_file, folder):
     """ Recover the analysis outputs and process them for plotting."""
 
     if solver == "CALCULIX":
         # read file and recover node displacements
-        output_file = str(file) + ".dat"
+        output_file = folder / (str(file) + ".dat")
         # all_disp : [nodeid, vx, vy, vz]
         all_disps = _get_from_dat(output_file, data="displacements")
 
@@ -323,7 +337,7 @@ def get_fea_outputs(file, solver, mesh_file):
             v_mean[disp] = np.average(all_disps[:, disp + 1])
 
         # calculate the average rotations
-        rotations_mean = _get_average_rotation(all_disps=all_disps, mesh_file=mesh_file)
+        rotations_mean = _get_average_rotation(all_disps=all_disps, mesh_file= folder / mesh_file)
 
         outputs = {
             "Ux": v_mean[0],
@@ -956,6 +970,27 @@ def _rotate_vector(angle, starting, axis):
     r = Rotation.from_rotvec(angle * np.array(axis), degrees=True)
     return r.apply(starting)
 
+def _make_analysis_folder(inputs, inputs_folder, name= None):
+
+    if name ==None:
+        name = datetime.today().strftime('%Y-%m-%d-%H-%M-%S') # basic timestamp
+    else:
+        assert isinstance(name,type('')), "name is the output folder name and should be a string."
+        # should also check that no special characters exist in name
+
+    # create the folder and copy all inputs into it
+    path = Path(os.getcwd(), name)
+    new_inputs = []
+    try: 
+        os.mkdir(path) 
+        for input_file in inputs:
+            if "." not in input_file:
+                input_file += ".inp" # add extension for calculix files 
+            shutil.copy2(Path(inputs_folder,input_file),path)
+    except OSError as error: 
+        print(error) 
+ 
+    return path
 
 if __name__ == "__main__":
     main(INPUTS[1])

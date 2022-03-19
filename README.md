@@ -20,12 +20,27 @@ Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cg
 
 2. Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses (see References section below).
 
-3. Execute the python script 'parametric_box.py' and inspect outputs: choose between `main(INPUT[0])` for a metallic Nastran model and `main(INPUT[1])` for a composite Calculix model.
+3. Setup a virtual python environment with Venv (optional, but very much recommended - see basics below). 
 
-4. Execute the python script 'parametric_studies.py' and inspect outputs: this script executes multiple iterations of the main() function from parametric_box.py with incremental input changes.
+4. Execute the python script 'parametric_box.py' and inspect outputs: choose between `main(INPUT[0])` for a metallic Nastran model and `main(INPUT[1])` for a composite Calculix model.
+
+5. Execute the python script 'parametric_studies.py' and inspect outputs: this script executes multiple iterations of the main() function from parametric_box.py with incremental input changes.
 Choose between `parametric_study_material(INPUTS[1])` for a composite material design study and `parametric_study_mesh(INPUTS[1])` for a mesh refinement study.
 
 Note: analysis output processing is only implemented for the Calculix analysis using INPUT[1].
+
+# Venv virtual environment
+
+We use a Venv to manage the imported python libraries - [Find out more about Venv here.](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#creating-a-virtual-environment). 
+
+To create and configure the virtual environment in Windows for example you can execute the following:
+```
+python3 -m venv venv
+venv\Scripts\activate
+python -m pip install -r requirements.txt
+```
+
+Where the requirements.txt lists the libraries this project is dependent on.
 # References
 
 * CalculiX GraphiX and Calculix CrunchiX (V2.15 or later): http://www.dhondt.de/
