@@ -46,7 +46,7 @@ INPUTS = [
             "disp": True,
             "debug_print": ["desvars", "ln_cons", "nl_cons", "objs", "totals"],
         },
-        "options": {"show_n2_diagram": True},
+        "options": {"show_n2_diagram": True, "delete_run_folders": True},
     }
 ]
 
@@ -90,6 +90,7 @@ class ParaBox(om.ExplicitComponent):
                 starting=[0.0, 1.0, 0.0],
                 axis=[0.0, 0.0, 1.0],
             )
+            params["process_flags"]["delete_run_folder"] = self.component_inputs["options"]["delete_run_folders"]
             return parabox.main(params)
 
         computed_data = compute_outputs(self.component_parameters, angle)
@@ -239,5 +240,5 @@ def _plot_iteration_histories(inputs_history=None, outputs_history=None):
 
 
 if __name__ == "__main__":
-    # main(INPUTS[0])
-    post_process(INPUTS[0])
+    main(INPUTS[0])
+    # post_process(INPUTS[0])

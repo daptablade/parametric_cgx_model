@@ -43,6 +43,7 @@ INPUTS = [
         "chord": 0.2,
         "filled_sections_flags": False,
         "inputs_folder": "inputs",
+        "output_folder": Path(os.getcwd(), "outputs"),
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "normal_modes.bdf",
         "nele_foil": [10, 10],
@@ -53,13 +54,14 @@ INPUTS = [
         "fea_solver": "NASTRAN",  # or "NASTRAN"
         "mesh_file": "all.bdf",
         "boundary_conditions": {"fix_lines": [0, 1], "loaded_lines": None},
-        "process_flags": {"run_post": False},
+        "process_flags": {"run_post": False, "delete_run_folder": False},
     },
     {
         "span": 2.0,
         "chord": 0.2,
         "filled_sections_flags": False,
         "inputs_folder": "inputs",
+        "output_folder": Path(os.getcwd(), "outputs"),
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "ccx_static_tip_shear",  # specify without file extension for CALCULIX
         "nele_foil": [10, 10],
@@ -93,13 +95,14 @@ INPUTS = [
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
         "boundary_conditions": {"fix_lines": [0, 1], "loaded_lines": [5, 6]},
-        "process_flags": {"run_post": True},
+        "process_flags": {"run_post": True, "delete_run_folder": False}
     },
     {
         "span": [0.085, 1.83, 0.085],
         "chord": [0.38, 0.38, 0.38],
         "filled_sections_flags": [True, False, True],
         "inputs_folder": "inputs",
+        "output_folder": Path(os.getcwd(), "outputs"),
         "airfoil_csv_file": "naca4418.csv",
         "airfoil_cut_chord_percentages": [5, 95],
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
@@ -129,7 +132,7 @@ INPUTS = [
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
         "boundary_conditions": {"fix_lines": None, "loaded_lines": None},
-        "process_flags": {"run_post": False},
+        "process_flags": {"run_post": False, "delete_run_folder": False},
     },
 ]
 
@@ -141,7 +144,11 @@ def main(inputs):
     print(inputs)
 
     # create the FEM analysis folder and copy input files into it
-    run_folder = _make_analysis_folder(inputs=[inputs["analysis_file"]], inputs_folder=inputs["inputs_folder"])
+    run_folder = _make_analysis_folder(
+        inputs=[inputs["analysis_file"]], 
+        inputs_folder=inputs["inputs_folder"], 
+        outputs_folder=inputs["output_folder"]
+        )
 
     geometry = get_geometry(inputs, plot_flag=PLOT_FLAG)
     infile = get_CGX_input_file(geometry, inputs, run_folder)
@@ -166,6 +173,13 @@ def main(inputs):
             folder=run_folder
         )
         print(outputs)
+
+    if inputs["process_flags"]["delete_run_folder"]:
+        # delete the run folder (recommend setting to True for optimisation)
+        shutil.rmtree(run_folder)
+        print(f"deleted run folder: {run_folder}")
+
+    if "outputs" in locals():
         return outputs
 
     print("End main process.\n")
@@ -296,7 +310,7 @@ def execute_CGX(infile):
     if LOCAL_EXECUTES["CGX"]:
         subprocess.run(
             LOCAL_EXECUTES["CGX"] + " -bg " + infile.parts[-1],
-            cwd= infile.parts[-2],
+            cwd= infile.parent,
             shell=True,
             check=True,
             capture_output=True,
@@ -970,7 +984,7 @@ def _rotate_vector(angle, starting, axis):
     r = Rotation.from_rotvec(angle * np.array(axis), degrees=True)
     return r.apply(starting)
 
-def _make_analysis_folder(inputs, inputs_folder, name= None):
+def _make_analysis_folder(inputs, inputs_folder, outputs_folder, name= None):
 
     if name ==None:
         name = datetime.today().strftime('%Y-%m-%d-%H-%M-%S') # basic timestamp
@@ -979,7 +993,7 @@ def _make_analysis_folder(inputs, inputs_folder, name= None):
         # should also check that no special characters exist in name
 
     # create the folder and copy all inputs into it
-    path = Path(os.getcwd(), name)
+    path = Path(outputs_folder, name)
     new_inputs = []
     try: 
         os.mkdir(path) 
