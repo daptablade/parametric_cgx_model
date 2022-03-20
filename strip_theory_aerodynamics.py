@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from parametric_box import INPUTS, PLOT_FLAG
 
 
-def dummy_node_diplacements(positions, ids, alpha_input=-5):
+def dummy_node_diplacements(positions, ids, args, alpha_input=-5):
     """Dummy displacements at the aero nodes to test get_alphas method."""
 
     le_nodes = positions[: int(len(positions) / 2), :]
@@ -16,20 +16,38 @@ def dummy_node_diplacements(positions, ids, alpha_input=-5):
     zdisp = -chord * np.tan(np.radians(alpha_input))
     te_disp = np.hstack([np.zeros([int(len(positions) / 2), 2]), zdisp.reshape(-1, 1)])
     disp = np.vstack([le_disp, te_disp])
-    # for real displacements, sort array in 0 direction by node ids
 
     return disp
 
 
-AERO_INPUTS = {
-    "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
-    "strips": 10,  # number of aero strips along the span >=1
-    "root_alpha": 10,  # AoA at the wing root in degrees
-    "rho": 1.225,  # air density in Pa
-    "V": 10,  # air velocity in m/s
-    "CL_alpha": 2 * np.pi,  # lift curve slope
-    "node_disp_from": dummy_node_diplacements,
-}
+def read_from_fem(positions, ids, args):
+    """Read FEM output displacements from precice."""
+    return read_from_file(args["file"])
+
+
+AERO_INPUTS = [
+    {
+        "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
+        "strips": 10,  # number of aero strips along the span >=1
+        "root_alpha": 10,  # AoA at the wing root in degrees
+        "rho": 1.225,  # air density in Pa
+        "V": 10,  # air velocity in m/s
+        "CL_alpha": 2 * np.pi,  # lift curve slope
+        "node_disp_from": {"f": dummy_node_diplacements, "args": None},
+    },
+    {
+        "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
+        "strips": 10,  # number of aero strips along the span >=1
+        "root_alpha": 10,  # AoA at the wing root in degrees
+        "rho": 1.225,  # air density in Pa
+        "V": 10,  # air velocity in m/s
+        "CL_alpha": 2 * np.pi,  # lift curve slope
+        "node_disp_from": {
+            "f": read_from_fem,
+            "args": {"file": "solver_1_displacement.txt"},
+        },
+    },
+]
 
 
 def plot_forces(nodes, forces, le_nodes, te_nodes):
@@ -150,7 +168,7 @@ class AeroModel(object):
         self.te_aeroforces = lift * 1 / 4
 
 
-def main(box_inputs):
+def main(aero_inputs, box_inputs):
     """Create the aero model and calculate the nodal forces as a function of
     the flight conditions.
 
@@ -161,7 +179,7 @@ def main(box_inputs):
     """
 
     # instantiate the aeromodel class
-    aeromodel = AeroModel(AERO_INPUTS, box_inputs)
+    aeromodel = AeroModel(aero_inputs, box_inputs)
 
     # define the corner nodes of the aerodynamic planform
     aeromodel.get_planform()
@@ -172,8 +190,10 @@ def main(box_inputs):
     aeronodes_ids = np.arange(len(aeronodes)) + 1
 
     # recover the local average angle of attack for each strip
-    displacements = AERO_INPUTS["node_disp_from"](
-        positions=aeronodes, ids=aeronodes_ids
+    displacements = aero_inputs["node_disp_from"]["f"](
+        positions=aeronodes,
+        ids=aeronodes_ids,
+        args=aero_inputs["node_disp_from"]["args"],
     )
     aeromodel.get_alphas(node_displacements=displacements)
 
@@ -193,8 +213,32 @@ def main(box_inputs):
             te_nodes=aeromodel.te_nodes,
         )
 
-    return aeronodes_ids, aeronodes, aeroforces
+    # write data to file
+    # write_data_to_file(data=aeronodes_ids, file="solver_1_node_ids.txt")
+    write_to_file(data=aeronodes, file="solver_1_nodes.txt")
+    write_to_file(data=aeroforces, file="solver_1_forces.txt")
+
+
+def read_from_file(file):
+    """Read arrays from text files."""
+    try:
+        array = np.loadtxt(file)
+        return array
+    except Exception as error:
+        print("Could not read solver input file - " + error)
+
+
+def write_to_file(file, data):
+    """Write array to text file."""
+    try:
+        assert isinstance(
+            data, type(np.array([0.0]))
+        ), "data should be of type np.ndarray"
+        np.savetxt(file, data, fmt="%s")
+    except Exception as error:
+        print("Could not write solver output file - " + error)
 
 
 if __name__ == "__main__":
-    _ = main(INPUTS[1])
+    # main(AERO_INPUTS[0], INPUTS[1])
+    main(AERO_INPUTS[1], INPUTS[1])
