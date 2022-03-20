@@ -1,10 +1,25 @@
 """ Static strip theory aerodynamics for symmetric aerofoils implemented in python."""
 
-from re import M
 import numpy as np
 import matplotlib.pyplot as plt
 
 from parametric_box import INPUTS, PLOT_FLAG
+
+
+def dummy_node_diplacements(positions, ids, alpha_input=-5):
+    """Dummy displacements at the aero nodes to test get_alphas method."""
+
+    le_nodes = positions[: int(len(positions) / 2), :]
+    te_nodes = positions[int(len(positions) / 2) :, :]
+    le_disp = np.zeros([int(len(positions) / 2), 3])  # fix the leading edge
+    chord = te_nodes[:, 0] - le_nodes[:, 0]
+    zdisp = -chord * np.tan(np.radians(alpha_input))
+    te_disp = np.hstack([np.zeros([int(len(positions) / 2), 2]), zdisp.reshape(-1, 1)])
+    disp = np.vstack([le_disp, te_disp])
+    # for real displacements, sort array in 0 direction by node ids
+
+    return disp
+
 
 AERO_INPUTS = {
     "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
@@ -13,6 +28,7 @@ AERO_INPUTS = {
     "rho": 1.225,  # air density in Pa
     "V": 10,  # air velocity in m/s
     "CL_alpha": 2 * np.pi,  # lift curve slope
+    "node_disp_from": dummy_node_diplacements,
 }
 
 
@@ -90,10 +106,11 @@ class AeroModel(object):
     def get_alphas(self, node_displacements=None):
         """Calculate the effective angle of incidence at each strip edge."""
 
-        alpha_flex = np.zeros(
-            [len(self.le_nodes), 1]
-        )  # TODO calculate from node_displacements
-
+        le_disp = node_displacements[: int(len(node_displacements) / 2), :]
+        te_disp = node_displacements[int(len(node_displacements) / 2) :, :]
+        chord = self.te_nodes[:, 0] - self.le_nodes[:, 0]
+        dz = te_disp[:, 2] - le_disp[:, 2]
+        alpha_flex = np.degrees(np.arctan(-dz / chord))
         self.alpha = alpha_flex + self.aero_inputs["root_alpha"]
 
     def compute_lift(self):
@@ -151,17 +168,20 @@ def main(box_inputs):
 
     # calculate the internal node positions at the leading and trailing edges
     aeromodel.get_all_nodes()
+    aeronodes = np.vstack([aeromodel.le_nodes, aeromodel.te_nodes])
+    aeronodes_ids = np.arange(len(aeronodes)) + 1
 
     # recover the local average angle of attack for each strip
-    aeromodel.get_alphas()
+    displacements = AERO_INPUTS["node_disp_from"](
+        positions=aeronodes, ids=aeronodes_ids
+    )
+    aeromodel.get_alphas(node_displacements=displacements)
 
     # calculate the Lift at the aerodynamic center of each strip
     aeromodel.compute_lift()
 
     # calculate the equivalent forces at the leading and trailing edges of the strip
     aeromodel.compute_aeroforces_at_nodes()
-
-    aeronodes = np.vstack([aeromodel.le_nodes, aeromodel.te_nodes])
     aeroforces = np.vstack([aeromodel.le_aeroforces, aeromodel.te_aeroforces])
 
     # plot the force distribution at the aero nodes
@@ -173,7 +193,7 @@ def main(box_inputs):
             te_nodes=aeromodel.te_nodes,
         )
 
-    return aeronodes, aeroforces
+    return aeronodes_ids, aeronodes, aeroforces
 
 
 if __name__ == "__main__":
