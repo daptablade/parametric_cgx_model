@@ -1,16 +1,23 @@
 from __future__ import division
 
 # ensure packages are available at linux distribution level (not using virtual environment)
+from pathlib import Path
 import argparse
 from dataclasses import dataclass
 import numpy as np
 import precice
 import subprocess
 
+
+PRECICE_FOLDER = Path(__file__).parent / "outputs"
+
 SOLVER_PYTHON_PATH = {
     "SolverOne": "venv/Scripts/python.exe",
     "SolverTwo": "venv/Scripts/python.exe",
 }
+# check that the run folder exist - else create it
+if not PRECICE_FOLDER.is_dir():
+    PRECICE_FOLDER.mkdir(parents=True)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -81,12 +88,16 @@ def execute_python(solver, module):
 
 
 if participant_name == "SolverOne":
-    vertices = read_from_file(file="../inputs/solver_1_nodes.txt")  # node x,y,z
+    if not (PRECICE_FOLDER / "solver_1_nodes.txt").is_file():
+        execute_python(solver=participant_name, module="strip_theory_aerodynamics.py")
+    vertices = read_from_file(file=PRECICE_FOLDER / "solver_1_nodes.txt")  # node x,y,z
     read_data = np.zeros((len(vertices), dimensions))  # displacements
     write_data = np.zeros((len(vertices), dimensions))  # forces
 
 if participant_name == "SolverTwo":
-    vertices = read_from_file(file="../inputs/solver_2_nodes.txt")  # node x,y,z
+    if not (PRECICE_FOLDER / "solver_2_nodes.txt").is_file():
+        execute_python(solver=participant_name, module="parametric_box.py")
+    vertices = read_from_file(file=PRECICE_FOLDER / "solver_2_nodes.txt")  # node x,y,z
     read_data = np.zeros((len(vertices), dimensions))  # forces
     write_data = np.zeros((len(vertices), dimensions))  # displacements
 
@@ -111,19 +122,19 @@ while interface.is_coupling_ongoing():
 
     if participant_name == "SolverOne":
         # write displacement input data to file
-        write_to_file(file="../solver_1_displacement.txt", data=read_data)
+        write_to_file(file=PRECICE_FOLDER / "solver_1_displacement.txt", data=read_data)
         # execute the aerodynamic analysis with the updated displacements
         execute_python(solver=participant_name, module="strip_theory_aerodynamics.py")
         # update wrtie_data with the force array
-        write_data = read_from_file(file="../solver_1_forces.txt")
+        write_data = read_from_file(file=PRECICE_FOLDER / "solver_1_forces.txt")
 
     if participant_name == "SolverTwo":
         # write force input data to file
-        write_to_file(file="../solver_2_forces.txt", data=read_data)
+        write_to_file(file=PRECICE_FOLDER / "solver_2_forces.txt", data=read_data)
         # execute the aerodynamic analysis with the updated displacements
         execute_python(solver=participant_name, module="parametric_box.py")
         # update wrtie_data with the discplacement array
-        write_data = read_from_file(file="../solver_2_displacements.txt")
+        write_data = read_from_file(file=PRECICE_FOLDER / "solver_2_displacements.txt")
 
     if interface.is_write_data_required(dt):
         # if participant_name == "SolverOne":

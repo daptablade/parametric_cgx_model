@@ -27,6 +27,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
+from context import PRECICE_FOLDER
+
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
     "CGX": "wsl /usr/local/bin/cgx_2.15",
@@ -140,6 +142,7 @@ INPUTS = [
         "filled_sections_flags": False,
         "inputs_folder": "inputs",
         "output_folder": Path(os.getcwd(), "outputs"),
+        "precice_folder": PRECICE_FOLDER,
         "airfoil_csv_file": "naca0012.csv",
         "analysis_file": "ccx_static_aero_forces",  # specify without file extension for CALCULIX
         "nele_foil": [10, 10],
@@ -213,9 +216,13 @@ def main(inputs):
         "precice_inout" in inputs["process_flags"]
         and inputs["process_flags"]["precice_inout"]
     ):
+        # check that the run folder exist - else create it
+        if not inputs["precice_folder"].is_dir():
+            inputs["precice_folder"].mkdir(parents=True)
+
         if (
-            not Path(inputs["inputs_folder"], "solver_2_nodes.txt").is_file()
-            or not Path(inputs["inputs_folder"], "solver_2_node_ids.txt").is_file()
+            not Path(inputs["precice_folder"], "solver_2_nodes.txt").is_file()
+            or not Path(inputs["precice_folder"], "solver_2_node_ids.txt").is_file()
         ):
             nb_nodes = _write_nodes_file(
                 readf={
@@ -223,16 +230,18 @@ def main(inputs):
                     "nodes": Path(run_folder, inputs["mesh_file"]),
                 },
                 writef={
-                    "nodes": Path(inputs["inputs_folder"], "solver_2_nodes.txt"),
-                    "node_ids": Path(inputs["inputs_folder"], "solver_2_node_ids.txt"),
+                    "nodes": Path(inputs["precice_folder"], "solver_2_nodes.txt"),
+                    "node_ids": Path(inputs["precice_folder"], "solver_2_node_ids.txt"),
                 },
             )
-            _write_zero_forces_dummy(nb_nodes, writef="solver_2_forces.txt")
+            _write_zero_forces_dummy(
+                nb_nodes, writef=Path(inputs["precice_folder"], "solver_2_forces.txt")
+            )
 
         _write_force_input(
             readf={
-                "forces": "solver_2_forces.txt",
-                "node_ids": Path(inputs["inputs_folder"], "solver_2_node_ids.txt"),
+                "forces": Path(inputs["precice_folder"], "solver_2_forces.txt"),
+                "node_ids": Path(inputs["precice_folder"], "solver_2_node_ids.txt"),
             },
             writef=Path(run_folder, "AERO_FORCES.inp"),
         )
@@ -257,7 +266,7 @@ def main(inputs):
     ):
         _write_displacement_output(
             readf=run_folder / (inputs["analysis_file"] + ".dat"),
-            writef="solver_2_displacements.txt",
+            writef=Path(inputs["precice_folder"], "solver_2_displacements.txt"),
         )
 
     if inputs["process_flags"]["delete_run_folder"]:

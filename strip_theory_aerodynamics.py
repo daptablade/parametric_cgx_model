@@ -1,30 +1,12 @@
 """ Static strip theory aerodynamics for symmetric aerofoils implemented in python."""
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 from parametric_box import INPUTS, PLOT_FLAG
-
-
-def dummy_node_diplacements(positions, ids, args):
-    """Dummy displacements at the aero nodes to test get_alphas method."""
-
-    alpha_input = args["alpha_input"]  # input target flexible delta AoA
-    le_nodes = positions[: int(len(positions) / 2), :]
-    te_nodes = positions[int(len(positions) / 2) :, :]
-    le_disp = np.zeros([int(len(positions) / 2), 3])  # fix the leading edge
-    chord = te_nodes[:, 0] - le_nodes[:, 0]
-    zdisp = -chord * np.tan(np.radians(alpha_input))
-    te_disp = np.hstack([np.zeros([int(len(positions) / 2), 2]), zdisp.reshape(-1, 1)])
-    disp = np.vstack([le_disp, te_disp])
-
-    return disp
-
-
-def read_from_fem(positions, ids, args):
-    """Read FEM output displacements from precice."""
-    return read_from_file(args["file"])
-
+from context import PRECICE_FOLDER
 
 AERO_INPUTS = [
     {
@@ -33,42 +15,10 @@ AERO_INPUTS = [
         "root_alpha": 10,  # AoA at the wing root in degrees
         "rho": 1.225,  # air density in Pa
         "V": 5.0,  # air velocity in m/s
-        "CL_alpha": 2 * np.pi,  # lift curve slope
-        "node_disp_from": {"f": dummy_node_diplacements, "args": {"alpha_input": 0.0}},
-    },
-    {
-        "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
-        "strips": 10,  # number of aero strips along the span >=1
-        "root_alpha": 10,  # AoA at the wing root in degrees
-        "rho": 1.225,  # air density in Pa
-        "V": 5.0,  # air velocity in m/s
-        "CL_alpha": 2 * np.pi,  # lift curve slope
-        "node_disp_from": {
-            "f": read_from_fem,
-            "args": {"file": "solver_1_displacement.txt"},
-        },
+        "CL_alpha": 2 * np.pi,  # ideal lift curve slope
+        "precice_folder": PRECICE_FOLDER,
     },
 ]
-
-
-def plot_forces(nodes, forces, le_nodes, te_nodes):
-    """Plot the force distribution in 3D over the aero planform."""
-
-    max_force = np.max(np.linalg.norm(forces, axis=1))
-    nforces = forces / max_force * 0.1
-    ax = plt.figure().add_subplot(projection="3d")
-    for (le, te) in zip(le_nodes, te_nodes):
-        ax.plot([le[0], te[0]], [le[1], te[1]], [le[2], te[2]], "o-b")
-    ax.quiver3D(
-        nodes[:, 0],
-        nodes[:, 1],
-        nodes[:, 2],
-        nforces[:, 0],
-        nforces[:, 1],
-        nforces[:, 2],
-        normalize=False,
-    )
-    plt.show()
 
 
 class AeroModel(object):
@@ -179,6 +129,10 @@ def main(aero_inputs, box_inputs):
     CL_alpha = lift curve slope
     """
 
+    # check that the run folder exist - else create it
+    if not aero_inputs["precice_folder"].is_dir():
+        aero_inputs["precice_folder"].mkdir(parents=True)
+
     # instantiate the aeromodel class
     aeromodel = AeroModel(aero_inputs, box_inputs)
 
@@ -191,11 +145,21 @@ def main(aero_inputs, box_inputs):
     aeronodes_ids = np.arange(len(aeronodes)) + 1
 
     # recover the local average angle of attack for each strip
-    displacements = aero_inputs["node_disp_from"]["f"](
-        positions=aeronodes,
-        ids=aeronodes_ids,
-        args=aero_inputs["node_disp_from"]["args"],
-    )
+    if not (aero_inputs["precice_folder"] / "solver_1_displacement.txt").is_file():
+        displacements = _dummy_node_diplacements(
+            positions=aeronodes,
+            ids=aeronodes_ids,
+            args={"alpha_input": 0.0},  # alpha= 0 for rigid wing
+        )
+    else:
+        displacements = _read_from_fem(
+            positions=aeronodes,
+            ids=aeronodes_ids,
+            args={
+                "file": (aero_inputs["precice_folder"] / "solver_1_displacement.txt")
+            },
+        )
+
     aeromodel.get_alphas(node_displacements=displacements)
 
     # calculate the Lift at the aerodynamic center of each strip
@@ -207,7 +171,7 @@ def main(aero_inputs, box_inputs):
 
     # plot the force distribution at the aero nodes
     if PLOT_FLAG:
-        plot_forces(
+        _plot_forces(
             nodes=aeronodes,
             forces=aeroforces,
             le_nodes=aeromodel.le_nodes,
@@ -216,11 +180,55 @@ def main(aero_inputs, box_inputs):
 
     # write data to file
     # write_data_to_file(data=aeronodes_ids, file="solver_1_node_ids.txt")
-    write_to_file(data=aeronodes, file="solver_1_nodes.txt")
-    write_to_file(data=aeroforces, file="solver_1_forces.txt")
+    _write_to_file(
+        data=aeronodes, file=(aero_inputs["precice_folder"] / "solver_1_nodes.txt")
+    )
+    _write_to_file(
+        data=aeroforces, file=(aero_inputs["precice_folder"] / "solver_1_forces.txt")
+    )
 
 
-def read_from_file(file):
+def _dummy_node_diplacements(positions, ids, args):
+    """Dummy displacements at the aero nodes to test get_alphas method."""
+
+    alpha_input = args["alpha_input"]  # input target flexible delta AoA
+    le_nodes = positions[: int(len(positions) / 2), :]
+    te_nodes = positions[int(len(positions) / 2) :, :]
+    le_disp = np.zeros([int(len(positions) / 2), 3])  # fix the leading edge
+    chord = te_nodes[:, 0] - le_nodes[:, 0]
+    zdisp = -chord * np.tan(np.radians(alpha_input))
+    te_disp = np.hstack([np.zeros([int(len(positions) / 2), 2]), zdisp.reshape(-1, 1)])
+    disp = np.vstack([le_disp, te_disp])
+
+    return disp
+
+
+def _read_from_fem(positions, ids, args):
+    """Read FEM output displacements from precice."""
+    return _read_from_file(args["file"])
+
+
+def _plot_forces(nodes, forces, le_nodes, te_nodes):
+    """Plot the force distribution in 3D over the aero planform."""
+
+    max_force = np.max(np.linalg.norm(forces, axis=1))
+    nforces = forces / max_force * 0.1
+    ax = plt.figure().add_subplot(projection="3d")
+    for (le, te) in zip(le_nodes, te_nodes):
+        ax.plot([le[0], te[0]], [le[1], te[1]], [le[2], te[2]], "o-b")
+    ax.quiver3D(
+        nodes[:, 0],
+        nodes[:, 1],
+        nodes[:, 2],
+        nforces[:, 0],
+        nforces[:, 1],
+        nforces[:, 2],
+        normalize=False,
+    )
+    plt.show()
+
+
+def _read_from_file(file):
     """Read arrays from text files."""
     try:
         array = np.loadtxt(file)
@@ -229,7 +237,7 @@ def read_from_file(file):
         print("Could not read solver input file - " + error)
 
 
-def write_to_file(file, data):
+def _write_to_file(file, data):
     """Write array to text file."""
     try:
         assert isinstance(
@@ -241,8 +249,5 @@ def write_to_file(file, data):
 
 
 if __name__ == "__main__":
-    # # use this to generate rigid wing forces input file for precice iter 0
-    # main(AERO_INPUTS[0], INPUTS[1])
-
     # # use this for flexible wing forces calculation from FEM displacements
-    main(AERO_INPUTS[1], INPUTS[1])
+    main(AERO_INPUTS[0], INPUTS[1])
