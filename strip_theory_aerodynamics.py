@@ -241,8 +241,8 @@ def write_to_file(file, data):
 
 
 if __name__ == "__main__":
-    # use this to generate rigid wing forces input file for precice iter 0
+    # # use this to generate rigid wing forces input file for precice iter 0
     # main(AERO_INPUTS[0], INPUTS[1])
 
-    # use this for flexible wing forces calculation from FEM displacements
+    # # use this for flexible wing forces calculation from FEM displacements
     main(AERO_INPUTS[1], INPUTS[1])

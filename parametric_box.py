@@ -213,7 +213,10 @@ def main(inputs):
         "precice_inout" in inputs["process_flags"]
         and inputs["process_flags"]["precice_inout"]
     ):
-        if not Path(inputs["inputs_folder"], "solver_2_node_ids.txt").is_file():
+        if (
+            not Path(inputs["inputs_folder"], "solver_2_nodes.txt").is_file()
+            or not Path(inputs["inputs_folder"], "solver_2_node_ids.txt").is_file()
+        ):
             nb_nodes = _write_nodes_file(
                 readf={
                     "node_ids": Path(run_folder, "TOP.nam"),
@@ -1191,7 +1194,7 @@ def _write_force_input(readf, writef):
     node_ids = read_from_file(readf["node_ids"])
     # generate a string with the force input cards for CCX
     cards = [
-        f"{int(node)},1,{force[0]}\n{int(node)},2,{force[1]}\n{int(node)},3,{force[2]}\n"
+        f"{int(node)},1,{force[0]:.2E}\n{int(node)},2,{force[1]:.2E}\n{int(node)},3,{force[2]:.2E}\n"
         for node, force in zip(node_ids, forces)
     ]
     # write the string to file

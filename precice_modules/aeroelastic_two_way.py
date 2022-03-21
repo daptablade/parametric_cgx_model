@@ -8,8 +8,8 @@ import precice
 import subprocess
 
 SOLVER_PYTHON_PATH = {
-    "SolverOne": "../venv/Scripts/python.exe",
-    "SolverTwo": "../venv/Scripts/python.exe",
+    "SolverOne": "venv/Scripts/python.exe",
+    "SolverTwo": "venv/Scripts/python.exe",
 }
 
 parser = argparse.ArgumentParser()
@@ -23,9 +23,7 @@ try:
     args = parser.parse_args()
 except SystemExit:
     print("")
-    print(
-        "Usage: python3 aeroelastic_two_way.py precice-config.xml participant-name mesh-name"
-    )
+    print("Usage: python3 aeroelastic_two_way.py config.xml participant-name mesh-name")
     quit()
 
 configuration_file_name = args.configurationFileName
@@ -105,7 +103,7 @@ dt = interface.initialize()
 iter_counter = 0
 while interface.is_coupling_ongoing():
     if interface.is_action_required(precice.action_write_iteration_checkpoint()):
-        print("DUMMY: Writing iteration checkpoint")
+        print(f"{participant_name}: Writing iteration checkpoint")
         interface.mark_action_fulfilled(precice.action_write_iteration_checkpoint())
 
     if interface.is_read_data_available():
@@ -131,13 +129,13 @@ while interface.is_coupling_ongoing():
         # if participant_name == "SolverOne":
         interface.write_block_vector_data(write_data_id, vertex_ids, write_data)
 
-    print("DUMMY: Advancing in time")
+    print(f"{participant_name} advancing in time")
     dt = interface.advance(dt)
     iter_counter += 1
 
     if interface.is_action_required(precice.action_read_iteration_checkpoint()):
-        print("DUMMY: Reading iteration checkpoint")
+        print(f"{participant_name}: Reading iteration checkpoint")
         interface.mark_action_fulfilled(precice.action_read_iteration_checkpoint())
 
 interface.finalize()
-print("DUMMY: Closing python solver dummy...")
+print(f"{participant_name}: Closing python solver ...")
