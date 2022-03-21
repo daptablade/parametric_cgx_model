@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import precice
 import subprocess
+from precice_post import post_process_solver_iters, write_solver_output_to_file
 
 
 PRECICE_FOLDER = Path(__file__).parent / "outputs"
@@ -76,15 +77,19 @@ def write_to_file(file, data):
         print("Could not write solver output file - " + error)
 
 
+solver_output = []
+
+
 def execute_python(solver, module):
     """Execute python from local windows venv folder."""
-    subprocess.run(
+    output = subprocess.run(
         SOLVER_PYTHON_PATH[solver] + " " + module,
         cwd="../.",
         shell=True,
         check=True,
         capture_output=True,
     )
+    solver_output.append(output.stdout.decode("utf-8"))
 
 
 if participant_name == "SolverOne":
@@ -115,6 +120,9 @@ iter_counter = 0
 while interface.is_coupling_ongoing():
     if interface.is_action_required(precice.action_write_iteration_checkpoint()):
         print(f"{participant_name}: Writing iteration checkpoint")
+        write_solver_output_to_file(
+            solver=participant_name, output=solver_output, folder=PRECICE_FOLDER
+        )
         interface.mark_action_fulfilled(precice.action_write_iteration_checkpoint())
 
     if interface.is_read_data_available():
@@ -147,6 +155,10 @@ while interface.is_coupling_ongoing():
     if interface.is_action_required(precice.action_read_iteration_checkpoint()):
         print(f"{participant_name}: Reading iteration checkpoint")
         interface.mark_action_fulfilled(precice.action_read_iteration_checkpoint())
+
+write_solver_output_to_file(
+    solver=participant_name, output=solver_output, folder=PRECICE_FOLDER
+)
 
 interface.finalize()
 print(f"{participant_name}: Closing python solver ...")

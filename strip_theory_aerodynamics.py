@@ -133,6 +133,8 @@ def main(aero_inputs, box_inputs):
     if not aero_inputs["precice_folder"].is_dir():
         aero_inputs["precice_folder"].mkdir(parents=True)
 
+    print("The parametric inputs are: \n", aero_inputs)
+
     # instantiate the aeromodel class
     aeromodel = AeroModel(aero_inputs, box_inputs)
 
@@ -162,8 +164,12 @@ def main(aero_inputs, box_inputs):
 
     aeromodel.get_alphas(node_displacements=displacements)
 
+    print("Local strip angle of incidence in degrees:\n", aeromodel.alpha)
+
     # calculate the Lift at the aerodynamic center of each strip
     aeromodel.compute_lift()
+
+    print("Local strip lift force at the aerodynamic centre:\n", aeromodel.lift)
 
     # calculate the equivalent forces at the leading and trailing edges of the strip
     aeromodel.compute_aeroforces_at_nodes()
@@ -186,6 +192,8 @@ def main(aero_inputs, box_inputs):
     _write_to_file(
         data=aeroforces, file=(aero_inputs["precice_folder"] / "solver_1_forces.txt")
     )
+
+    print("End main process.\n")
 
 
 def _dummy_node_diplacements(positions, ids, args):
