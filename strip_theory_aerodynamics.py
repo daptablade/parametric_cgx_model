@@ -6,9 +6,10 @@ import matplotlib.pyplot as plt
 from parametric_box import INPUTS, PLOT_FLAG
 
 
-def dummy_node_diplacements(positions, ids, args, alpha_input=-5):
+def dummy_node_diplacements(positions, ids, args):
     """Dummy displacements at the aero nodes to test get_alphas method."""
 
+    alpha_input = args["alpha_input"]  # input target flexible delta AoA
     le_nodes = positions[: int(len(positions) / 2), :]
     te_nodes = positions[int(len(positions) / 2) :, :]
     le_disp = np.zeros([int(len(positions) / 2), 3])  # fix the leading edge
@@ -31,16 +32,16 @@ AERO_INPUTS = [
         "strips": 10,  # number of aero strips along the span >=1
         "root_alpha": 10,  # AoA at the wing root in degrees
         "rho": 1.225,  # air density in Pa
-        "V": 10,  # air velocity in m/s
+        "V": 5.0,  # air velocity in m/s
         "CL_alpha": 2 * np.pi,  # lift curve slope
-        "node_disp_from": {"f": dummy_node_diplacements, "args": None},
+        "node_disp_from": {"f": dummy_node_diplacements, "args": {"alpha_input": 0.0}},
     },
     {
         "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
         "strips": 10,  # number of aero strips along the span >=1
         "root_alpha": 10,  # AoA at the wing root in degrees
         "rho": 1.225,  # air density in Pa
-        "V": 10,  # air velocity in m/s
+        "V": 5.0,  # air velocity in m/s
         "CL_alpha": 2 * np.pi,  # lift curve slope
         "node_disp_from": {
             "f": read_from_fem,
@@ -240,5 +241,8 @@ def write_to_file(file, data):
 
 
 if __name__ == "__main__":
+    # use this to generate rigid wing forces input file for precice iter 0
     # main(AERO_INPUTS[0], INPUTS[1])
+
+    # use this for flexible wing forces calculation from FEM displacements
     main(AERO_INPUTS[1], INPUTS[1])
