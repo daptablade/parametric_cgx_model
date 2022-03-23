@@ -6,21 +6,22 @@ from multiprocessing import Process
 import subprocess
 
 PRECICE_EXECUTES = {
-    "aero": "wsl -d Ubuntu-20.04 -e bash wsl_script_aero.bash",
-    "structure": "wsl -d Ubuntu-20.04 -e bash wsl_script_structures.bash",
+    "aero": "wsl -d Ubuntu-20.04 -e ./wsl_script_aero.bash",
+    "structure": "wsl -d Ubuntu-20.04 -e ./wsl_script_structures.bash",
 }
 
 
 def solver_exec(solver, folder):
     """Execute precice call from windows."""
 
-    subprocess.run(
+    result = subprocess.run(
         PRECICE_EXECUTES[solver] + "> output_" + solver + ".txt &",
         cwd=folder,
         shell=True,
         check=True,
         capture_output=True,
     )
+    print(result)
     print(f"{solver} completed.")
 
 
