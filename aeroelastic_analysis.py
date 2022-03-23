@@ -6,8 +6,8 @@ from multiprocessing import Process
 import subprocess
 
 PRECICE_EXECUTES = {
-    "aero": "wsl -d Ubuntu-20.04 -e python3 aeroelastic_two_way.py precice_two_way.xml SolverOne MeshOne",
-    "structure": "wsl -d Ubuntu-20.04 -e python3 aeroelastic_two_way.py precice_two_way.xml SolverTwo MeshTwo",
+    "aero": "wsl -d Ubuntu-20.04 -e bash wsl_script_aero.bash",
+    "structure": "wsl -d Ubuntu-20.04 -e bash wsl_script_structures.bash",
 }
 
 
