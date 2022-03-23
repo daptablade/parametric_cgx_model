@@ -1,3 +1,5 @@
+"""Define imports that are used by one or more modules."""
+
 import sys
 from pathlib import Path
 

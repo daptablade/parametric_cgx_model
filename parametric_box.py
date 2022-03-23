@@ -1164,7 +1164,7 @@ def _get_from_inp(file, keyword: str = None):
     # extract data
     read_flag = False
     data = []
-    for index, line in enumerate(contents):
+    for line in contents:
         if "*" in line and keyword in line:
             read_flag = True
             continue

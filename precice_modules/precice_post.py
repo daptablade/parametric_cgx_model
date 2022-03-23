@@ -116,10 +116,6 @@ def _post_process_strip_theory_aero(output, folder):
     return parsed_output[-1]
 
 
-# def main(folder_list=None, solvers=None, run_ids=None):
-#     pass
-
-
 if __name__ == "__main__":
     converged_aero_out = post_process_solver_iters(
         solver="SolverOne", folder=Path(__file__).parent / "outputs"

@@ -2,49 +2,62 @@
 
 ## Description
 
-Parametric shell half-wing model geometry creation and meshing in CalculiX GraphiX, followed by FEA analysis (using Nastran or CalculiX CrunchiX) and analysis output recovery and processing (implemented for CalculiX CrunchiX only).
+The aim is to demonstrate various engineering simulation processes using python3 and open source software. The simulation processes are developed around the example of a simple parametric composite wing model that is fixed at the root.
 
-The script assumes that CalculiX and Nastran are installed and working. Adjust the executable calls as needed in `LOCAL_EXECUTES`.
+Core engineering simulation processes explored include:
 
-**Background and explainer video for this script are available on our Dapta blog:**
+* Geometry creation and meshing in CalculiX GraphiX
+* FEA analysis (using Nastran or CalculiX CrunchiX) and analysis output recovery and processing (implemented for CalculiX CrunchiX only).
+* Design optimisation using OpenMDAO
+* Coupling of disciplinary analyses (here: structures and aero) using preCICE  
+
+The script assumes that CalculiX GraphiX / CrunchiX, Nastran (optional) and preCICE (optional) are installed and working.
+Adjust the executable calls as needed, for exmaple in [parametric_box.py](./parametric_box.py) global variable `LOCAL_EXECUTES`.
+
+The examples are written for python3 on Windows and accuming access to Windows Systems for Linux 2 (`wsl`). Running on linux should be possible, but you will have to update any solver or subprocess calls that include the `wsl` command to local linux calls.
+
+**Background and explainer videos for this script are available on our Dapta blog:**
 
 * 16/12/2021: [Parametric FEM model creation with Python and CalculiX GraphiX (cgx)](https://www.dapta.com/parametric-fem-model-creation-with-python-and-calculix-graphix-cgx/);
 Corresponding code release: [v0.0.1](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.1)
 * 21/01/2022: [Automated FEM analysis and output processing with Python and CalculiX CrunchiX (ccx)](https://www.dapta.com/automated-fem-analysis-and-output-processing-with-python-and-calculix-crunchix-ccx/) Corresponding code release: [v0.0.2](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.2)
 * 15/02/2022: [Design optimisation in practice with Python, OpenMDAO and Scipy](https://www.dapta.com/design-optimisation-in-practice-with-python-openmdao-and-scipy/)
 Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.3)
+* 24/03/2022: [Multidisciplinary analysis with Python, PreCICE and Calculix Crunchix]()
 
 ## Quick Start
 
-1. Make sure you have CalculiX GraphiX (CGX) installed.
-
-2. Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses (see References section below).
+1. Make sure you have CalculiX GraphiX (CGX) installed. Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses (see References section below).
 
 3. Setup a virtual python environment with Venv (optional, but very much recommended - see basics below).
 
-4. Execute the python script 'parametric_box.py' and inspect outputs: choose between `main(INPUT[0])` for a metallic Nastran model and `main(INPUT[1])` for a composite Calculix model.
+4. Execute the python script [parametric_box.py](./parametric_box.py) and inspect outputs: choose between `main(INPUT[0])` for a metallic Nastran model and `main(INPUT[1])` for a composite Calculix model.
 
-5. Execute the python script 'parametric_studies.py' and inspect outputs: this script executes multiple iterations of the main() function from parametric_box.py with incremental input changes.
+5. Execute the python script [parametric_studies.py](./parametric_studies.py) and inspect outputs: this script executes multiple iterations of the main() function from `parametric_box.py` with incremental input changes.
 Choose between `parametric_study_material(INPUTS[1])` for a composite material design study and `parametric_study_mesh(INPUTS[1])` for a mesh refinement study.
 
-6. Execute the python script 'design_optimisation.py' and inspect outputs:
-this script executes a design optimisation using the [OpenMDAO](https://openmdao.org/) library. See our Feb 2022 blog post on the topic: [Design optimisation in practice with Python, OpenMDAO and Scipy](https://www.dapta.com/design-optimisation-in-practice-with-python-openmdao-and-scipy/)
+6. Execute the python script [design_optimisation.py](./design_optimisation.py) and inspect outputs:
+this script executes a design optimisation using the [OpenMDAO](https://openmdao.org/) library. Warning: execution takes ~5-10min ...
 
-Note: analysis output processing is only implemented for the Calculix analysis using INPUT[1].
+7. Execute a coupled aero/structures analysis using preCICE, CalculiX CrunchiX and a simplified static strip theory aero model. First install precice - see separate instructions here: [preCICE README](./precice_modules/README.md). Then execute [aeroelastic_analysis.py](./aeroelastic_analysis.py). Warning: Again, this takes a bit of time as both solvers will execute several times until the loads are converged.
+
+Note: FEM analysis output processing is only implemented for the Calculix analyses using INPUT[1] or INPUT[3].
 
 ## Venv virtual environment
 
 We use a Venv to manage the imported python libraries - [Find out more about Venv here.](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/#creating-a-virtual-environment).
 
-To create and configure the virtual environment in Windows for example you can execute the following:
+To create and configure the virtual environment in Windows execute the following in the command line:
 
 ```
-python3 -m venv venv
-venv\Scripts\activate
-python -m pip install -r requirements.txt
+> python3 -m venv venv
+> venv\Scripts\activate
+> python -m pip install -r requirements.txt
 ```
 
 Where the requirements.txt lists the libraries this project is dependent on.
+
+For preCICE, it is recommended you create a separate wsl virtual environment under the `precice_modules` folder. See separate preCICE installation instructions here: [preCICE README](./precice_modules/README.md).
 
 ## References
 
@@ -53,6 +66,8 @@ Where the requirements.txt lists the libraries this project is dependent on.
 * MSC Nastran (v2020 or later): [https://www.mscsoftware.com/product/msc-nastran](https://www.mscsoftware.com/product/msc-nastran)
 
 * OpenMDAO: [https://openmdao.org/](https://openmdao.org/)
+
+* PreCICE: [https://precice.org/index.html](https://precice.org/index.html)
 
 ## Author and License
 

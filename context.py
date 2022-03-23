@@ -1,3 +1,5 @@
+"""Define imports that are used by one or more modules."""
+
 from pathlib import Path
 
 # folder accessed by precice and all coupled solvers
