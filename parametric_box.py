@@ -221,10 +221,11 @@ def main(inputs):
             inputs["precice_folder"].mkdir(parents=True)
 
         if (
-            not Path(inputs["precice_folder"], "solver_2_nodes.txt").is_file()
+            PLOT_FLAG
+            or not Path(inputs["precice_folder"], "solver_2_nodes.txt").is_file()
             or not Path(inputs["precice_folder"], "solver_2_node_ids.txt").is_file()
         ):
-            nb_nodes = _write_nodes_file(
+            node_ids, nodes_xyz = _write_nodes_file(
                 readf={
                     "node_ids": Path(run_folder, "TOP.nam"),
                     "nodes": Path(run_folder, inputs["mesh_file"]),
@@ -234,17 +235,22 @@ def main(inputs):
                     "node_ids": Path(inputs["precice_folder"], "solver_2_node_ids.txt"),
                 },
             )
-            _write_zero_forces_dummy(
-                nb_nodes, writef=Path(inputs["precice_folder"], "solver_2_forces.txt")
-            )
+            if not Path(inputs["precice_folder"], "solver_2_forces.txt").is_file():
+                _write_zero_forces_dummy(
+                    len(node_ids),
+                    writef=Path(inputs["precice_folder"], "solver_2_forces.txt"),
+                )
 
-        _write_force_input(
+        forces = _write_force_input(
             readf={
                 "forces": Path(inputs["precice_folder"], "solver_2_forces.txt"),
                 "node_ids": Path(inputs["precice_folder"], "solver_2_node_ids.txt"),
             },
             writef=Path(run_folder, "AERO_FORCES.inp"),
         )
+        if PLOT_FLAG:
+            # plot force distribution over the nodes
+            _plot_forces_ditribution(nodes_xyz, forces)
 
     # run the FEM model analysis
     execute_fea(inputs["analysis_file"], inputs["fea_solver"], run_folder)
@@ -1188,7 +1194,7 @@ def _write_nodes_file(readf, writef):
     write_to_file(file=writef["node_ids"], data=node_ids)
     # write node positions to file
     write_to_file(file=writef["nodes"], data=nodes)
-    return len(node_ids)
+    return node_ids, nodes
 
 
 def _write_zero_forces_dummy(nb_nodes, writef):
@@ -1209,6 +1215,8 @@ def _write_force_input(readf, writef):
     # write the string to file
     with open(writef, "w", encoding="utf-8") as f:
         f.write("".join(cards))
+
+    return forces
 
 
 def _write_displacement_output(readf, writef):
@@ -1235,6 +1243,29 @@ def write_to_file(file, data):
         np.savetxt(file, data, fmt="%s")
     except Exception as error:
         print("Could not write solver output file - " + error)
+
+
+def _plot_forces_ditribution(nodes, forces):
+    """Plot the applied force distribution in 3D."""
+
+    zscalingf = np.max(forces[:, 2])
+    ax = plt.figure().add_subplot(projection="3d")
+    ax.set_xlim3d(0, np.max(nodes[:, 0]))
+    ax.set_ylim3d(0, np.max(nodes[:, 1]))
+    ax.set_zlim3d(0, zscalingf * 2)
+    ax.scatter(nodes[:, 0], nodes[:, 1], nodes[:, 2], marker="o")
+    ax.quiver(
+        nodes[:, 0],
+        nodes[:, 1],
+        nodes[:, 2],
+        forces[:, 0],
+        forces[:, 1],
+        forces[:, 2],
+        normalize=False,
+        arrow_length_ratio=0.0,
+        color="g",
+    )
+    plt.show()
 
 
 if __name__ == "__main__":

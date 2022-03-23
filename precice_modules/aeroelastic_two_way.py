@@ -3,14 +3,11 @@ from __future__ import division
 # ensure packages are available at linux distribution level (not using virtual environment)
 from pathlib import Path
 import argparse
-from dataclasses import dataclass
 import numpy as np
 import precice
 import subprocess
-from precice_post import post_process_solver_iters, write_solver_output_to_file
-
-
-PRECICE_FOLDER = Path(__file__).parent / "outputs"
+from local_context import PRECICE_FOLDER
+from precice_post import write_solver_output_to_file, post_process_solver_iters
 
 SOLVER_PYTHON_PATH = {
     "SolverOne": "venv/Scripts/python.exe",
@@ -156,6 +153,7 @@ while interface.is_coupling_ongoing():
         print(f"{participant_name}: Reading iteration checkpoint")
         interface.mark_action_fulfilled(precice.action_read_iteration_checkpoint())
 
+# save iteration history
 write_solver_output_to_file(
     solver=participant_name, output=solver_output, folder=PRECICE_FOLDER
 )
