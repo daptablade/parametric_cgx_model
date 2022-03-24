@@ -27,6 +27,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
+from context import PRECICE_FOLDER
+
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
     "CGX": "wsl /usr/local/bin/cgx_2.15",
@@ -134,6 +136,56 @@ INPUTS = [
         "boundary_conditions": {"fix_lines": None, "loaded_lines": None},
         "process_flags": {"run_post": False, "delete_run_folder": False},
     },
+    {
+        "span": 2.0,
+        "chord": 0.2,
+        "filled_sections_flags": False,
+        "inputs_folder": "inputs",
+        "output_folder": Path(os.getcwd(), "outputs"),
+        "precice_folder": PRECICE_FOLDER,
+        "airfoil_csv_file": "naca0012.csv",
+        "analysis_file": "ccx_static_aero_forces",  # specify without file extension for CALCULIX
+        "nele_foil": [10, 10],
+        "nele_span": 40,
+        "node_merge_tol": 0.002,
+        "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
+        "cgx_solver": "abq",  # or "nas"
+        "fea_solver": "CALCULIX",  # or "NASTRAN"
+        "composite_plies": [
+            {
+                "id": "p_0",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_0",
+            },
+            {
+                "id": "p_90",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_90",
+            },
+        ],
+        "orientations": [
+            {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
+            {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
+        ],
+        "composite_layup": {
+            "aero": (["p_90"] + ["p_0"] * 3 + ["p_90"] * 2 + ["p_0"] * 3 + ["p_90"]),
+        },
+        "shell_set_name": {"aero": "Eall"},
+        "composite_props_file": "composite_shell.inp",
+        "mesh_file": "all.msh",
+        "boundary_conditions": {
+            "fix_lines": [0, 1],
+            "loaded_lines": [5],
+            "loaded_surfaces": [0],
+        },
+        "process_flags": {
+            "run_post": True,
+            "delete_run_folder": False,
+            "precice_inout": True,
+        },
+    },
 ]
 
 
@@ -160,6 +212,46 @@ def main(inputs):
     if "composite_layup" in inputs:
         get_composite_properties_input(inputs, run_folder)
 
+    if (
+        "precice_inout" in inputs["process_flags"]
+        and inputs["process_flags"]["precice_inout"]
+    ):
+        # check that the run folder exist - else create it
+        if not inputs["precice_folder"].is_dir():
+            inputs["precice_folder"].mkdir(parents=True)
+
+        if (
+            PLOT_FLAG
+            or not Path(inputs["precice_folder"], "solver_2_nodes.txt").is_file()
+            or not Path(inputs["precice_folder"], "solver_2_node_ids.txt").is_file()
+        ):
+            node_ids, nodes_xyz = _write_nodes_file(
+                readf={
+                    "node_ids": Path(run_folder, "TOP.nam"),
+                    "nodes": Path(run_folder, inputs["mesh_file"]),
+                },
+                writef={
+                    "nodes": Path(inputs["precice_folder"], "solver_2_nodes.txt"),
+                    "node_ids": Path(inputs["precice_folder"], "solver_2_node_ids.txt"),
+                },
+            )
+            if not Path(inputs["precice_folder"], "solver_2_forces.txt").is_file():
+                _write_zero_forces_dummy(
+                    len(node_ids),
+                    writef=Path(inputs["precice_folder"], "solver_2_forces.txt"),
+                )
+
+        forces = _write_force_input(
+            readf={
+                "forces": Path(inputs["precice_folder"], "solver_2_forces.txt"),
+                "node_ids": Path(inputs["precice_folder"], "solver_2_node_ids.txt"),
+            },
+            writef=Path(run_folder, "AERO_FORCES.inp"),
+        )
+        if PLOT_FLAG:
+            # plot force distribution over the nodes
+            _plot_forces_ditribution(nodes_xyz, forces)
+
     # run the FEM model analysis
     execute_fea(inputs["analysis_file"], inputs["fea_solver"], run_folder)
     print("Executed FEM analysis.")
@@ -174,15 +266,24 @@ def main(inputs):
         )
         print(outputs)
 
+    if (
+        "precice_inout" in inputs["process_flags"]
+        and inputs["process_flags"]["precice_inout"]
+    ):
+        _write_displacement_output(
+            readf=run_folder / (inputs["analysis_file"] + ".dat"),
+            writef=Path(inputs["precice_folder"], "solver_2_displacements.txt"),
+        )
+
     if inputs["process_flags"]["delete_run_folder"]:
         # delete the run folder (recommend setting to True for optimisation)
         shutil.rmtree(run_folder)
         print(f"deleted run folder: {run_folder}")
 
+    print("End main process.\n")
+
     if "outputs" in locals():
         return outputs
-
-    print("End main process.\n")
 
 
 def get_geometry(inputs, plot_flag=False):
@@ -230,15 +331,22 @@ def get_cgx_input_file(geometry, inputs, folder):
     if "boundary_conditions" in inputs:
         fix_lines = inputs["boundary_conditions"]["fix_lines"]  # [0] is to fix the root
         loaded_lines = inputs["boundary_conditions"]["loaded_lines"]
+        if "loaded_surfaces" in inputs["boundary_conditions"]:
+            loaded_surfaces = inputs["boundary_conditions"]["loaded_surfaces"]
+        else:
+            loaded_surfaces = None
+
     else:
         fix_lines = None
         loaded_lines = None
+        loaded_surfaces = None
 
     # create string of all input commands
     cgx_commands = _get_commands(
         geometry,
         fix_lines,
         loaded_lines,
+        loaded_surfaces=loaded_surfaces,
         merge_tol=inputs["node_merge_tol"],
         cgx_ele_type=inputs["cgx_ele_type"],
         solver=inputs["cgx_solver"],
@@ -354,14 +462,24 @@ def get_fea_outputs(file, solver, mesh_file, folder):
         # all_disp : [nodeid, vx, vy, vz]
         all_disps = _get_from_dat(output_file, data="displacements")
 
+        # get node ids for displacement output > read from LAST.nam file
+        node_ids = np.array(
+            _get_from_inp(file=Path(folder, "LAST.nam"), keyword="NSET,NSET="),
+            dtype=float,
+        )
+
+        # filter all_disp by node ids
+        disp_filter = np.isin(all_disps[:, 0], node_ids)
+        tip_disps = all_disps[disp_filter, :]
+
         # average the deflections
         v_mean = np.zeros((3))
         for disp in range(3):
-            v_mean[disp] = np.average(all_disps[:, disp + 1])
+            v_mean[disp] = np.average(tip_disps[:, disp + 1])
 
         # calculate the average rotations
         rotations_mean = _get_average_rotation(
-            all_disps=all_disps, mesh_file=folder / mesh_file
+            all_disps=tip_disps, mesh_file=folder / mesh_file
         )
 
         outputs = {
@@ -709,7 +827,13 @@ def _get_cgx_lines_3d(
 
 
 def _get_commands(
-    geometry, fix_lines, loaded_lines, merge_tol=0.001, cgx_ele_type=10, solver="abq"
+    geometry,
+    fix_lines,
+    loaded_lines,
+    loaded_surfaces,
+    merge_tol=0.001,
+    cgx_ele_type=10,
+    solver="abq",
 ):
 
     commands = []
@@ -795,6 +919,10 @@ def _get_commands(
         commands.append(
             "SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
         )
+    if loaded_surfaces:
+        commands.append(
+            "SETA TOP s " + " ".join([f"V{id:05d}" for id in loaded_surfaces]) + "\n"
+        )
 
     commands.append("# =============== \n")
     # surface meshes
@@ -832,6 +960,9 @@ def _get_commands(
     if loaded_lines:
         commands.append("comp LAST d\n")
         commands.append(f"send LAST {solver} names\n")
+    if loaded_surfaces:
+        commands.append("comp TOP d\n")
+        commands.append(f"send TOP {solver} names\n")
     if rib_ids:
         commands.append("comp RIBS d\n")
         commands.append(f"send RIBS {solver} names\n")
@@ -1026,5 +1157,116 @@ def _make_analysis_folder(inputs, inputs_folder, outputs_folder, name=None):
     return path
 
 
+def _get_from_inp(file, keyword: str = None):
+    with open(file, "r", encoding="utf-8") as f:
+        contents = f.readlines()
+
+    # extract data
+    read_flag = False
+    data = []
+    for line in contents:
+        if "*" in line and keyword in line:
+            read_flag = True
+            continue
+        if not "**" in line and "*" in line and not keyword in line:
+            break
+        if read_flag:
+            data.append(line.strip().rstrip(",").split(","))
+
+    return data
+
+
+def _write_nodes_file(readf, writef):
+    # read the node ids from the node set file
+    node_ids = np.array(
+        _get_from_inp(file=readf["node_ids"], keyword="NSET,NSET="), dtype=float
+    )
+    # read the node locations from the mesh file in the node ids order
+    all_nodes = np.array(
+        _get_from_inp(file=readf["nodes"], keyword="NODE, NSET=Nall"), dtype=float
+    )
+    # make sure the order of the node positions is the same as the node ids,
+    # as precice input forces will be read in the node id order
+    sorter = np.argsort(all_nodes[:, 0])
+    indices = sorter[np.searchsorted(all_nodes[:, 0], node_ids, sorter=sorter)]
+    nodes = all_nodes[indices.flatten(), 1:]
+    # write node ids to file
+    write_to_file(file=writef["node_ids"], data=node_ids)
+    # write node positions to file
+    write_to_file(file=writef["nodes"], data=nodes)
+    return node_ids, nodes
+
+
+def _write_zero_forces_dummy(nb_nodes, writef):
+    """Initialises the forces applied to the FEM to zero."""
+    data = np.zeros((nb_nodes, 3))
+    write_to_file(writef, data)
+
+
+def _write_force_input(readf, writef):
+    # read force data from precice output file
+    forces = read_from_file(readf["forces"])
+    node_ids = read_from_file(readf["node_ids"])
+    # generate a string with the force input cards for CCX
+    cards = [
+        f"{int(node)},1,{force[0]:.2E}\n{int(node)},2,{force[1]:.2E}\n{int(node)},3,{force[2]:.2E}\n"
+        for node, force in zip(node_ids, forces)
+    ]
+    # write the string to file
+    with open(writef, "w", encoding="utf-8") as f:
+        f.write("".join(cards))
+
+    return forces
+
+
+def _write_displacement_output(readf, writef):
+    # all_disp : [nodeid, vx, vy, vz]
+    all_disps = _get_from_dat(readf, data="displacements")
+    write_to_file(writef, all_disps[:, 1:])
+
+
+def read_from_file(file):
+    """Read arrays from text files."""
+    try:
+        array = np.loadtxt(file)
+        return array
+    except Exception as error:
+        print("Could not read solver input file - " + error)
+
+
+def write_to_file(file, data):
+    """Write array to text file."""
+    try:
+        assert isinstance(
+            data, type(np.array([0.0]))
+        ), "data should be of type np.ndarray"
+        np.savetxt(file, data, fmt="%s")
+    except Exception as error:
+        print("Could not write solver output file - " + error)
+
+
+def _plot_forces_ditribution(nodes, forces):
+    """Plot the applied force distribution in 3D."""
+
+    zscalingf = np.max(forces[:, 2])
+    ax = plt.figure().add_subplot(projection="3d")
+    ax.set_xlim3d(0, np.max(nodes[:, 0]))
+    ax.set_ylim3d(0, np.max(nodes[:, 1]))
+    ax.set_zlim3d(0, zscalingf * 2)
+    ax.scatter(nodes[:, 0], nodes[:, 1], nodes[:, 2], marker="o")
+    ax.quiver(
+        nodes[:, 0],
+        nodes[:, 1],
+        nodes[:, 2],
+        forces[:, 0],
+        forces[:, 1],
+        forces[:, 2],
+        normalize=False,
+        arrow_length_ratio=0.0,
+        color="g",
+    )
+    plt.show()
+
+
 if __name__ == "__main__":
-    main(INPUTS[1])
+    main(INPUTS[3])

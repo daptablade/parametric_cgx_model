@@ -73,16 +73,34 @@ def parametric_study_mesh(inputs):
     print("Parametric study completed.")
 
 
-def _plot_study_results(output, x, y):
+def _plot_study_results(
+    output: list,  # list of dictionaries
+    x: list,  # x-values
+    y: list,  # key of y-values
+    xlabel="ply rotation angle (deg)",
+    ylabel="displacements (m) or rotation (rad)",
+    saveas=None,
+):
 
     y_series = []
     for result in output:
-        y_series.append([result[label] for label in y])
+        if len(y) == 1 and isinstance(result[y[0]], list):
+            if len(output) > 1:
+                y_series.append(result[y[0]])
+            else:
+                y_series = result[y[0]]
+        else:
+            y_series.append([result[label] for label in y])
 
     lineObjects = plt.plot(x, y_series)
-    plt.xlabel("ply rotation angle (deg)")
-    plt.xlabel("displacements (m) or rotation (rad)")
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
     plt.legend(iter(lineObjects), y)
+
+    if saveas:
+        plt.savefig(saveas + ".png")
+        plt.savefig(saveas + ".pdf")
+
     plt.show()
 
     return {
