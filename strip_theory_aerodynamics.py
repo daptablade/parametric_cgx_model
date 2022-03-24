@@ -1,9 +1,7 @@
 """ Static strip theory aerodynamics for symmetric aerofoils implemented in python."""
 
-import os
 import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
 
 from parametric_box import INPUTS, PLOT_FLAG
 from context import PRECICE_FOLDER
@@ -127,6 +125,9 @@ def main(aero_inputs, box_inputs):
     V = air velocity
     alpha = effective angle of attack
     CL_alpha = lift curve slope
+
+    incremental lift is calculated for each strip as:
+    dL =  1/2 * rho * V**2 * CL_alpha * alpha * ds
     """
 
     # check that the run folder exist - else create it
