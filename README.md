@@ -24,7 +24,7 @@ Corresponding code release: [v0.0.1](https://github.com/daptablade/parametric_cg
 * 15/02/2022: [Design optimisation in practice with Python, OpenMDAO and Scipy](https://www.dapta.com/design-optimisation-in-practice-with-python-openmdao-and-scipy/)
 Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.3)
 * 24/03/2022: [Multidisciplinary analysis with Python, PreCICE and Calculix Crunchix](https://www.dapta.com/multidisciplinary-analysis-with-python-precice-and-calculix-crunchix/) 
-Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.4)
+Corresponding code release: [v0.0.4](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.4)
 
 ## Quick Start
 
