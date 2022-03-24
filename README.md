@@ -23,7 +23,7 @@ Corresponding code release: [v0.0.1](https://github.com/daptablade/parametric_cg
 * 21/01/2022: [Automated FEM analysis and output processing with Python and CalculiX CrunchiX (ccx)](https://www.dapta.com/automated-fem-analysis-and-output-processing-with-python-and-calculix-crunchix-ccx/) Corresponding code release: [v0.0.2](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.2)
 * 15/02/2022: [Design optimisation in practice with Python, OpenMDAO and Scipy](https://www.dapta.com/design-optimisation-in-practice-with-python-openmdao-and-scipy/)
 Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.3)
-* 24/03/2022: [Multidisciplinary analysis with Python, PreCICE and Calculix Crunchix]()
+* 24/03/2022: [Multidisciplinary analysis with Python, PreCICE and Calculix Crunchix](https://www.dapta.com/multidisciplinary-analysis-with-python-precice-and-calculix-crunchix/)
 
 ## Quick Start
 
