@@ -12,9 +12,9 @@ Core engineering simulation processes explored include:
 * Coupling of disciplinary analyses (here: structures and aero) using preCICE  
 
 The script assumes that CalculiX GraphiX / CrunchiX, Nastran (optional) and preCICE (optional) are installed and working.
-Adjust the executable calls as needed, for exmaple in [parametric_box.py](./parametric_box.py) global variable `LOCAL_EXECUTES`.
+Adjust the executable calls as needed, for example in [parametric_box.py](./parametric_box.py) global variable `LOCAL_EXECUTES`.
 
-The examples are written for python3 on Windows and accuming access to Windows Systems for Linux 2 (`wsl`). Running on linux should be possible, but you will have to update any solver or subprocess calls that include the `wsl` command to local linux calls.
+The examples are written for python3 on Windows and assuming access to Windows Systems for Linux 2 (`wsl`). Running on linux should be possible, but you will have to update any solver or subprocess calls that include the `wsl` command to local linux calls.
 
 **Background and explainer videos for this script are available on our Dapta blog:**
 
@@ -40,7 +40,7 @@ Choose between `parametric_study_material(INPUTS[1])` for a composite material d
 6. Execute the python script [design_optimisation.py](./design_optimisation.py) and inspect outputs:
 this script executes a design optimisation using the [OpenMDAO](https://openmdao.org/) library. Warning: execution takes ~5-10min ...
 
-7. Execute a coupled aero/structures analysis using preCICE, CalculiX CrunchiX and a simplified static strip theory aero model. First install precice - see separate instructions here: [preCICE README](./precice_modules/README.md). Then execute [aeroelastic_analysis.py](./aeroelastic_analysis.py). Warning: Again, this takes a bit of time as both solvers will execute several times until the loads are converged.
+7. Execute a coupled aero/structures analysis using preCICE, CalculiX CrunchiX and a simplified static strip theory aero model. First install preCICE - see separate instructions here: [preCICE README](./precice_modules/README.md). Then execute [aeroelastic_analysis.py](./aeroelastic_analysis.py). Warning: Again, this takes a bit of time as both solvers will execute several times until the loads are converged.
 
 Note: FEM analysis output processing is only implemented for the Calculix analyses using INPUT[1] or INPUT[3].
 
