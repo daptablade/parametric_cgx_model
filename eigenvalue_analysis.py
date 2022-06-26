@@ -1,8 +1,5 @@
-from cProfile import label
-from enum import unique
-from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import eigsh, eigs
-from scipy.linalg import eig, eigh
+from scipy.sparse import csr_matrix, bmat, eye
+from scipy.sparse.linalg import eigsh, eigs, inv
 from scipy.interpolate import interp2d
 import numpy as np
 import matplotlib.pyplot as plt
@@ -193,7 +190,9 @@ def plot_modes(data_sets, modes="all"):
     plt.show()
 
 
-def get_aero_evects(evecs, lookup, nodes_xyz, aeronodes, fixed=None, dirs=[3]):
+def get_aero_evects(
+    evecs, lookup, nodes_xyz, aeronodes, fixed=None, dirs=[3], plot_flag=False
+):
 
     # filter evecs to nodes xyz and dims only
     filtered_evecs, filtered_dofs = filter_evec(
@@ -228,14 +227,134 @@ def get_aero_evects(evecs, lookup, nodes_xyz, aeronodes, fixed=None, dirs=[3]):
             aero_evecs[nodeid, index] = f(node[0], node[1])
 
     # plot selected modes for visual check
-    plot_modes(
+    if plot_flag:
+        plot_modes(
+            [
+                (X, Y, reduced_evecs, "FEM"),
+                (aeronodes[:, 0], aeronodes[:, 1], aero_evecs, "AERO"),
+            ]
+        )
+
+    return aero_evecs
+
+
+def get_chords_from_aero_dofs(aeromodel):
+    c = np.zeros([len(aeromodel.le_nodes), 1])
+    for ii in range(len(aeromodel.le_nodes)):
+        c[ii] = aeromodel.te_nodes[ii, 0] - aeromodel.le_nodes[ii, 0]
+    return c
+
+
+def get_lift_factor_from_aero_dofs(aeromodel, span):
+    aw = np.zeros([len(aeromodel.le_nodes), 1])
+    for ii in range(len(aeromodel.le_nodes)):
+        aw[ii] = 2 * np.pi * (1 - (aeromodel.le_nodes[ii, 1] / span) ** 3)
+    return aw
+
+
+def get_phi(aero_evecs, option):
+
+    nnodes = int(aero_evecs.shape[0] / 2)
+    phi = np.zeros([nnodes, aero_evecs.shape[1]])
+    for index, col in enumerate(aero_evecs.T):
+        if option == "LEplusTE":
+            phi[:, index] = col[:nnodes] + col[nnodes:]
+        elif option == "LEminusTE":
+            phi[:, index] = col[:nnodes] - col[nnodes:]
+        else:
+            raise ValueError(f"Option {option} is not recognised.")
+    return phi
+
+
+def get_aero_component_matrices(aeromodel, aero_evecs):
+
+    # get component matrices
+    span = aeromodel._point_b[1]
+    nstrips = aeromodel.aero_inputs["strips"]
+    c = get_chords_from_aero_dofs(aeromodel)  # vector of length dof/2
+    aw = get_lift_factor_from_aero_dofs(aeromodel, span)  # vector of length dof/2
+    dy_strips = (
+        np.vstack([np.array([0.5]), np.ones([nstrips - 1, 1]), np.array([0.5])])
+        * span
+        / (nstrips + 1)
+    )  # vector of length dof/2
+
+    # matrices of dof/2 * n eigenvectors
+    phi_LEplusTE = get_phi(aero_evecs, option="LEplusTE")
+    phi_LEminusTE = get_phi(aero_evecs, option="LEminusTE")
+
+    return c, aw, dy_strips, phi_LEplusTE, phi_LEminusTE
+
+
+def get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25):
+    c, aw, dy_strips, phi_LEplusTE, phi_LEminusTE = get_aero_component_matrices(
+        aeromodel, aero_evecs
+    )
+    mat_size = aero_evecs.shape[1]
+    B_mat = np.zeros([mat_size, mat_size], dtype=np.float64)
+    for index in range(mat_size):
+        B_mat[index, :] = (
+            (1 / 8)
+            * phi_LEplusTE[:, index].transpose()
+            @ np.diag((c * aw * dy_strips)[:, 0])
+            @ phi_LEplusTE
+            - (e / 4)
+            * phi_LEminusTE[:, index].transpose()
+            @ np.diag((c * aw * dy_strips)[:, 0])
+            @ phi_LEplusTE
+            - (Mxi_dot / 8)
+            * phi_LEminusTE[:, index].transpose()
+            @ np.diag((c * dy_strips)[:, 0])
+            @ phi_LEminusTE
+        )
+
+    return csr_matrix(B_mat)
+
+
+def get_aero_stiffness(aeromodel, aero_evecs, e=0.25):
+    _, aw, dy_strips, phi_LEplusTE, phi_LEminusTE = get_aero_component_matrices(
+        aeromodel, aero_evecs
+    )
+    mat_size = aero_evecs.shape[1]
+    C_mat = np.zeros([mat_size, mat_size], dtype=np.float64)
+    for index in range(mat_size):
+        C_mat[index, :] = (1 / 4) * phi_LEplusTE[:, index].transpose() @ np.diag(
+            (aw * dy_strips)[:, 0]
+        ) @ phi_LEminusTE - (e / 2) * phi_LEminusTE[:, index].transpose() @ np.diag(
+            (aw * dy_strips)[:, 0]
+        ) @ phi_LEminusTE
+
+    return csr_matrix(C_mat)
+
+
+def get_system_matrix(problem, rho, V):
+
+    M = problem["M"]
+    K = problem["K"]
+    B = problem["B"]
+    C = problem["C"]
+    Q = bmat(
         [
-            (X, Y, reduced_evecs, "FEM"),
-            (aeronodes[:, 0], aeronodes[:, 1], aero_evecs, "AERO"),
+            [None, eye(M.shape[0], dtype=np.float64)],
+            [-inv(M) @ (K + rho * V**2 * C), -inv(M) @ (rho * V * B)],
         ]
     )
 
-    return aero_evecs
+    return Q
+
+
+@timeit
+def get_complex_aero_modes(problem, rho, V):
+
+    Q = get_system_matrix(problem, rho, V)
+
+    evals_small, evecs_small = eigs(Q, k=10, sigma=0.0, which="LM")
+    # damping ratios
+    # print frequencies in Hz
+    V_omega = np.abs(evals_small) / (2 * np.pi)
+    print("Eigenvalues (Hz): ", V_omega)
+
+    return V_omega
 
 
 def main(file, folder, aero_inputs=None, box_inputs=None):
@@ -273,6 +392,10 @@ def main(file, folder, aero_inputs=None, box_inputs=None):
     omega, evals, evecs = get_normal_modes(problem)
 
     if aero_inputs:
+        # get modal mass and stiffness matrices
+        problem["M"] = csr_matrix(evecs.T @ problem["mas"] @ evecs)
+        problem["K"] = csr_matrix(evecs.T @ problem["sti"] @ evecs)
+
         # instantiate aero model
         aeromodel = AeroModel(aero_inputs, box_inputs)
 
@@ -282,11 +405,19 @@ def main(file, folder, aero_inputs=None, box_inputs=None):
         # calculate the internal aero node positions at the leading and trailing edges
         aeromodel.get_all_nodes()
         aeronodes = np.vstack([aeromodel.le_nodes, aeromodel.te_nodes])
-        aeronodes_ids = np.arange(len(aeronodes)) + 1
 
         # filter normal mode eigenvector DOFs and reduce from 3D element nodes to shell nodes
         aero_evecs = get_aero_evects(
-            evecs, lookup, nodes_xyz, aeronodes, fixed=fixed_dofs
+            evecs, lookup, nodes_xyz, aeronodes, fixed=fixed_dofs, plot_flag=False
+        )
+
+        # get aero damping and stiffness matrices B and C
+        problem["B"] = get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25)
+        problem["C"] = get_aero_stiffness(aeromodel, aero_evecs, e=0.25)
+
+        # flutter / divergence analysis
+        V_omega = get_complex_aero_modes(
+            problem, rho=aero_inputs["rho"], V=aero_inputs["V"]
         )
 
     return omega
