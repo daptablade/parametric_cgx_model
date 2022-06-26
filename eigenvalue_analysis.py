@@ -1,4 +1,4 @@
-from scipy.sparse import csr_matrix, bmat, eye
+from scipy.sparse import csr_matrix, csc_matrix, bmat, eye
 from scipy.sparse.linalg import eigsh, eigs, inv
 from scipy.interpolate import interp2d
 import numpy as np
@@ -393,8 +393,8 @@ def main(file, folder, aero_inputs=None, box_inputs=None):
 
     if aero_inputs:
         # get modal mass and stiffness matrices
-        problem["M"] = csr_matrix(evecs.T @ problem["mas"] @ evecs)
-        problem["K"] = csr_matrix(evecs.T @ problem["sti"] @ evecs)
+        problem["M"] = csc_matrix(evecs.T @ problem["mas"] @ evecs)
+        problem["K"] = csc_matrix(evecs.T @ problem["sti"] @ evecs)
 
         # instantiate aero model
         aeromodel = AeroModel(aero_inputs, box_inputs)
