@@ -1,14 +1,18 @@
+from typing import Counter
 from scipy.sparse import csr_matrix, csc_matrix, bmat, eye
 from scipy.sparse.linalg import eigsh, eigs, inv
-from scipy.interpolate import interp2d
+from scipy.interpolate import LinearNDInterpolator, interp2d
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pathlib import Path
 import csv
 
 from utils import timeit
 from strip_theory_aerodynamics import AeroModel, AERO_INPUTS
 
+# For interactive session debugging:
+# np.set_printoptions(precision=3, linewidth=200)
 
 PLATE_AERO = {
     "planform": {
@@ -20,7 +24,13 @@ PLATE_AERO = {
     "strips": 10,  # number of aero strips along the span >=1
     "root_alpha": 10,  # AoA at the wing root in degrees
     "rho": 1.225,  # air density in Pa
-    "V": 5.0,  # air velocity in m/s
+    "V": {
+        "start": 1.0,
+        "end": 45.0,
+        "inc0": 2.0,
+        "inc_min": 0.01,
+    },  # air velocity range in m/s
+    "mode_tracking_threshold": 0.60,
     "CL_alpha": 2 * np.pi,  # ideal lift curve slope
 }
 
@@ -97,21 +107,21 @@ def get_rows_from_dofs(dofs, lookup):
 
 
 @timeit
-def get_normal_modes(problem):
+def get_normal_modes(problem, k=10):
     # solve an eigenvalue problem to obtain 10 lowest eigenvalues
     # evals_small, evecs_small = eigs(
     #     problem["sti"], k=10, M=problem["mas"], sigma=0.0, which="LR"
     # )
     # # print frequencies in Hz
     # omega = np.sqrt(evals_small) / (2 * np.pi)
-    # print("Eigenvalues (Hz): ", omega)
+    # print("Normal modes frequencies (Hz): ", omega)
 
     evals_small, evecs_small = eigsh(
-        problem["sti"], k=10, M=problem["mas"], sigma=0.0, which="LM"
+        problem["sti"], k=k, M=problem["mas"], sigma=0.0, which="LM"
     )
     # print frequencies in Hz
     omega = np.sqrt(evals_small) / (2 * np.pi)
-    print("Eigenvalues (Hz): ", omega)
+    print("Normal modes frequencies (Hz): ", omega)
 
     return omega, evals_small, evecs_small
 
@@ -222,7 +232,7 @@ def get_aero_evects(
     # interpolate aero eigenvectors
     aero_evecs = np.zeros([len(aeronodes), reduced_evecs.shape[1]])
     for index, evect in enumerate(reduced_evecs.transpose()):
-        f = interp2d(X, Y, evect, kind="linear")
+        f = LinearNDInterpolator((X, Y), evect)
         for nodeid, node in enumerate(aeronodes):
             aero_evecs[nodeid, index] = f(node[0], node[1])
 
@@ -248,7 +258,9 @@ def get_chords_from_aero_dofs(aeromodel):
 def get_lift_factor_from_aero_dofs(aeromodel, span):
     aw = np.zeros([len(aeromodel.le_nodes), 1])
     for ii in range(len(aeromodel.le_nodes)):
-        aw[ii] = 2 * np.pi * (1 - (aeromodel.le_nodes[ii, 1] / span) ** 3)
+        aw[ii] = aeromodel.aero_inputs["CL_alpha"] * (
+            1 - (aeromodel.le_nodes[ii, 1] / span) ** 3
+        )
     return aw
 
 
@@ -328,6 +340,9 @@ def get_aero_stiffness(aeromodel, aero_evecs, e=0.25):
 
 
 def get_system_matrix(problem, rho, V):
+    """Define the modal aeroelastic system matrix Q.
+    Ref: Olivia Stodieck, Aeroelastic Tailoring of Tow-steered Composite Wings, Phd Thesis 2016
+    """
 
     M = problem["M"]
     K = problem["K"]
@@ -343,21 +358,316 @@ def get_system_matrix(problem, rho, V):
     return Q
 
 
+def get_macpx(
+    e_model1,
+    e_model2,
+    mu_model1,
+    mu_model2,
+    v,
+    plot_flag=False,
+    figure_name=None,
+    threshold=0.6,
+):
+    """Calculate the MACXP criterion to identify mode switchings.
+    Ref: P. Vacher, B. Jacquier, A. Bucharles, "Extensions of the MAC criterion
+    to complex modes", PROCEEDINGS OF ISMA2010 INCLUDING USD2010, pp.2713-2726
+    """
+
+    # get mode shape
+    modes = len(e_model1)
+
+    # calculate the MACXP criterion from equation [28] in the reference
+    macxp = np.zeros([modes, modes])
+    for ii, mii in enumerate(mu_model1.T):
+        for jj, mjj in enumerate(mu_model2.T):
+            coef = (
+                np.abs(np.vdot(mii, mjj)) / np.abs(np.conj(e_model1[ii]) + e_model2[jj])
+                + np.abs(np.dot(mii, mjj)) / np.abs(e_model1[ii] + e_model2[jj])
+            ) ** 2 / (
+                (
+                    np.vdot(mii, mii) / (2 * np.abs(e_model1[ii].real))
+                    + np.abs(np.dot(mii, mii)) / (2 * np.abs(e_model1[ii]))
+                )
+                * (
+                    np.vdot(mjj, mjj) / (2 * np.abs(e_model2[jj].real))
+                    + np.abs(np.dot(mjj, mjj)) / (2 * np.abs(e_model2[jj]))
+                )
+            )
+            macxp[ii, jj] = coef.real
+
+    if plot_flag:
+        ax = plt.figure().add_subplot()
+        im = ax.imshow(macxp, cmap="jet", vmin=0.0, vmax=1.0)
+        # create an axes on the right side of ax. The width of cax will be 5%
+        # of ax and the padding between cax and ax will be fixed at 0.05 inch.
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+        colorbar = plt.colorbar(im, cax=cax)
+        # Loop over data dimensions and create text annotations.
+        for i in range(modes):
+            for j in range(modes):
+                if macxp[i, j] >= threshold:
+                    text = ax.text(
+                        j,
+                        i,
+                        "%.2f" % macxp[i, j],
+                        ha="center",
+                        va="center",
+                        color="w",
+                        fontsize=8,
+                    )
+        ax.set_title(f"MACXP criterion at V={v}m/s")
+        if figure_name:
+            plt.savefig(figure_name)
+        plt.close()
+
+    return macxp
+
+
+def get_mode_order(macxp, threshold=0.6, dthreashold=0.6):
+    """Determine most likely mode numbering based on macxp criterion.
+    If the order cannot be determined, the algorithm fails and the velocity
+    increment is cut-back.
+
+    Note: had to increase dthreashold to large value (0.6) to ensure plate model convergence with 16 modes.
+    """
+
+    modes = macxp.shape[0]
+    mode_ids = np.zeros(modes)
+    mcounter = 1
+    for mode in macxp:
+        index = np.argwhere(mode >= threshold)
+        if len(index) < 2 or len(index) > 2:
+            index = np.argsort(mode)[-2:]
+            if mode_ids[index[1]]:
+                # this mode has already been alocated a mode_id
+                continue
+            elif np.abs(mode[index[0]] - threshold) <= dthreashold:
+                print(f"Mode tracking threshold set to {mode[index[0]]}.")
+            elif mode[index[0]] - threshold < -dthreashold:
+                break
+            elif mode[index[0]] - threshold > dthreashold:
+                break
+        assert len(index) == 2, "Something went wrong here..."
+        if not all(mode_ids[index]):
+            mode_ids[index] = mcounter
+            mcounter += 1
+
+    if all(mode_ids > 0.0):
+        # mode ordering successful
+        return mode_ids, True
+    else:
+        # mode ordering failed
+        return None, False
+
+
+def plot_histories(inputs):
+    """Plot QOIs y over input range x."""
+
+    for input in inputs:
+        ax = plt.figure().add_subplot()
+        for index, series in enumerate(input["y"].T):
+            ax.plot(
+                input["x"],
+                series,
+                marker="o",
+                linestyle="-",
+                color=input["colors"][index],
+            )
+        ax.set_xlabel(input["x_label"])
+        ax.set_ylabel(input["y_label"])
+        ax.grid(visible=True, which="major", color="#999999", linestyle="-", alpha=0.2)
+        plt.savefig(input["fname"])
+        plt.close()
+
+
 @timeit
-def get_complex_aero_modes(problem, rho, V):
+def get_complex_aero_modes(
+    problem, rho, Vdict, k=10, plot_flag=False, folder=None, threshold=0.55
+):
+    """Solve the aeroelastic stability equations at incrementally increasing
+    velocity values to identify flutter and divergence speeds (pk method)."""
 
-    Q = get_system_matrix(problem, rho, V)
+    print("Starting aeroelastic stability analysis.")
 
-    evals_small, evecs_small = eigs(Q, k=10, sigma=0.0, which="LM")
-    # damping ratios
-    # print frequencies in Hz
-    V_omega = np.abs(evals_small) / (2 * np.pi)
-    print("Eigenvalues (Hz): ", V_omega)
+    V_omega = np.zeros([0, k])
+    V_damping = np.zeros([0, k])
+    V_eig = np.empty([0, k], dtype=np.complex128)
+    V_mode_id = np.zeros([0, k])
+    V_flutter = np.zeros([0, k], dtype=np.bool8)
+    V_divergence = np.zeros([0, k], dtype=np.bool8)
+    V_eigv_memory = np.empty([k, k], dtype=np.complex128)
+    flutter = []
+    divergence = []
+    vinc = Vdict["inc0"]  # starting velocity increment
+    velocity = Vdict["start"]
+    index = 0
+    V = []
+    incV_flag = True
+    while incV_flag:
 
-    return V_omega
+        tracked = False
+        iteration_counter = 0
+        while tracked is False:
+
+            # solve complex eigenvalue problem
+            Q = get_system_matrix(problem, rho, velocity)
+            evals_small, evecs_small = eigs(Q, k=k, sigma=0.0, which="LM")
+
+            # mode tracking
+            if index == 0:
+                e_model1 = evals_small
+                e_model2 = e_model1
+                mu_model1 = evecs_small[k:, :]
+                mu_model2 = mu_model1
+            else:
+                e_model1 = V_eig[index - 1, :]
+                e_model2 = evals_small
+                mu_model1 = V_eigv_memory
+                mu_model2 = evecs_small[k:, :]
+            macxp = get_macpx(
+                e_model1,
+                e_model2,
+                mu_model1=mu_model1,
+                mu_model2=mu_model2,
+                v=velocity,
+                plot_flag=plot_flag,
+                figure_name=str(Path(folder, "macxp.png")),
+                threshold=threshold,
+            )
+            mode_order, tracked = get_mode_order(macxp, threshold=threshold)
+            if not tracked:
+
+                # reduce velocity increment of current step
+                if index == 0:
+                    velocity = Vdict["start"]
+                else:
+                    velocity = V[-1]
+                    vinc *= 0.75
+                    if vinc < Vdict["inc_min"]:
+                        vinc = Vdict["inc_min"]
+                    velocity += vinc
+                    iteration_counter += 1
+
+                if vinc < Vdict["inc_min"]:
+                    print(
+                        "No convergence of the mode tracking: reduce threshold or reduce min V increment."
+                    )
+                    break
+                elif iteration_counter > 20:
+                    print(
+                        "No convergence of the mode tracking: max number of iterations reached."
+                    )
+                    break
+
+                print(f"Cut-back velocity increment to {vinc} m/z.")
+
+            else:
+                pat = [(0, 1), (0, 0)]
+                V_mode_id = np.append(V_mode_id, [mode_order], axis=0)
+                V_eig = np.pad(V_eig, pat, mode="empty")
+                V_omega = np.pad(V_omega, pat, mode="constant")
+                V_damping = np.pad(V_damping, pat, mode="constant")
+                V_flutter = np.pad(V_flutter, pat, mode="constant")
+                V_divergence = np.pad(V_divergence, pat, mode="constant")
+                if vinc < Vdict["inc0"]:
+                    vinc = Vdict["inc0"]
+                    print(f"Reset velocity increment to {vinc} m/s.")
+
+        if tracked:
+            for mode in np.unique(V_mode_id[index, :]):
+                ii = np.argwhere(V_mode_id[index, :] == mode)
+                col = int(mode - 1)
+                # reorder the eigenvalue output by ascending mode number (for plotting)
+                V_eig[index, int((mode - 1) * 2)] = evals_small[ii[0]]
+                V_eig[index, int((mode - 1) * 2 + 1)] = evals_small[ii[1]]
+                V_eigv_memory[:, int((mode - 1) * 2)] = evecs_small[k:, ii[0]].flatten()
+                V_eigv_memory[:, int((mode - 1) * 2 + 1)] = evecs_small[
+                    k:, ii[1]
+                ].flatten()
+                if np.isclose(np.conj(evals_small[ii[0]]), evals_small[ii[1]]):
+                    # underdamped mode - complex conjugate modes
+                    e = evals_small[ii[0]]
+                    omega = np.abs(e)  # rads
+                    V_omega[index, col] = omega / (2 * np.pi)  # Hz
+                    V_damping[index, col] = -1.0 * e.real / omega * 100
+                    if V_damping[index, col] <= 0:
+                        V_flutter[index, col] = True
+                        if index == 0 or V_flutter[index - 1, col] == False:
+                            flutter.append({"mode": int(mode), "V": velocity})
+                else:
+                    # critically or overdamped mode
+                    e = evals_small[ii]
+                    V_omega[index, col] = 0.0  # Hz
+                    V_damping[index, col] = np.min(-1.0 * e.real / np.abs(e) * 100)
+                    if V_damping[index, col] <= 0:
+                        V_divergence[index, col] = True
+                        if index == 0 or V_divergence[index - 1, col] == False:
+                            divergence.append({"mode": int(mode), "V": velocity})
+
+            V.append(velocity)
+            print(f"V={velocity}m/s step completed.")
+            velocity += vinc
+            index += 1
+        else:
+            incV_flag = False
+
+        if velocity >= Vdict["end"]:
+            incV_flag = False
+
+    print("Flutter modes:", flutter)
+    print("Divergence modes:", divergence)
+    print("Completed aeroelastic stability analysis.")
+
+    if plot_flag:
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        repeat_colors = [
+            color
+            for sublist in [item for item in zip(colors, colors)]
+            for color in sublist
+        ]
+        plot_histories(
+            [
+                {
+                    "x": V,
+                    "y": V_omega[:, np.nonzero(V_omega[0, :])[0]],
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "Frequency, Hz",
+                    "fname": str(Path(folder, "V_omega.png")),
+                    "colors": colors,
+                },
+                {
+                    "x": V,
+                    "y": V_damping[:, np.nonzero(V_damping[0, :])[0]],
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "Damping ratio, %",
+                    "fname": str(Path(folder, "V_damping.png")),
+                    "colors": colors,
+                },
+                {
+                    "x": V,
+                    "y": V_eig.real,
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "real part of eigenvalue",
+                    "fname": str(Path(folder, "V_eig_real.png")),
+                    "colors": repeat_colors,
+                },
+                {
+                    "x": V,
+                    "y": V_eig.imag,
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "imaginary part of eigenvalue",
+                    "fname": str(Path(folder, "V_eig_imag.png")),
+                    "colors": repeat_colors,
+                },
+            ]
+        )
+
+    return V, V_omega, V_damping, V_eig, V_mode_id, flutter, divergence
 
 
-def main(file, folder, aero_inputs=None, box_inputs=None):
+@timeit
+def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
 
     # dofs that are constrained
     csv_file = Path(folder, "SPC_123456.bou")
@@ -389,9 +699,13 @@ def main(file, folder, aero_inputs=None, box_inputs=None):
         print("Warning: Mass matrix is not positive definite.")
 
     # normal modes analysis
-    omega, evals, evecs = get_normal_modes(problem)
+    omega, evals, evecs = get_normal_modes(problem, k=k_modes)
 
     if aero_inputs:
+        assert (
+            k_modes % 2 == 0.0
+        ), "Define even number of k_modes for the aeroelastic analysis."
+
         # get modal mass and stiffness matrices
         problem["M"] = csc_matrix(evecs.T @ problem["mas"] @ evecs)
         problem["K"] = csc_matrix(evecs.T @ problem["sti"] @ evecs)
@@ -416,44 +730,79 @@ def main(file, folder, aero_inputs=None, box_inputs=None):
         problem["C"] = get_aero_stiffness(aeromodel, aero_evecs, e=0.25)
 
         # flutter / divergence analysis
-        V_omega = get_complex_aero_modes(
-            problem, rho=aero_inputs["rho"], V=aero_inputs["V"]
+        V, V_omega, V_damping, _, _, flutter, divergence = get_complex_aero_modes(
+            problem,
+            rho=aero_inputs["rho"],
+            Vdict=aero_inputs["V"],
+            k=k_modes,
+            plot_flag=True,
+            folder=folder,
+            threshold=aero_inputs[
+                "mode_tracking_threshold"
+            ],  # used of macxp mode sorting
         )
-
-    return omega
-
-    # results = eig(problem["sti"], b=problem["mas"])
-    # print(np.sqrt(np.sort(results[0])) / (2 * np.pi))
+        return omega, V, V_omega, V_damping, flutter, divergence
+    else:
+        return omega
 
 
 if __name__ == "__main__":
 
     # SIMPLE PLATE normal modes checks
     freq_scipy = main(
-        file="ccx_normal_modes_matout", folder="outputs/test_mat_out/test_simple_plate"
+        file="ccx_normal_modes_matout",
+        folder="outputs/test_mat_out/test_simple_plate_0_-45_45",
+        k_modes=15,
     )
     freq_ccx = np.array(
         [
-            0.1112296e02,
-            0.3969891e02,
-            0.7415313e02,
-            0.1408884e03,
-            0.3089473e03,
-            0.4026458e03,
-            0.7748749e03,
-            0.2052274e04,
-            0.2144465e04,
-            0.3231235e04,
+            0.9844066e01,
+            0.4930842e02,
+            0.6179677e02,
+            0.1572807e03,
+            0.1738530e03,
+            0.2941666e03,
+            0.3399870e03,
+            0.4720929e03,
+            0.5622821e03,
+            0.6990578e03,
+            0.6997033e03,
+            0.8424458e03,
+            0.9799083e03,
+            0.1183415e04,
+            0.1318173e04,
         ]
     )
     assert np.allclose(freq_scipy, freq_ccx, rtol=1e-3)
 
     # SIMPLE PLATE flutter analysis check
-    freq_scipy = main(
+    freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
         file="ccx_normal_modes_matout",
-        folder="outputs/test_mat_out/test_simple_plate",
+        folder="outputs/test_mat_out/test_simple_plate_0_-45_45",
         aero_inputs=PLATE_AERO,
+        k_modes=16,
     )
+    assert flutter == [{"mode": 2, "V": 33.0}]
+    assert divergence == [{"mode": 1, "V": 35.0}]
+    flutter_index = np.argwhere(np.isclose(V, flutter[0]["V"]))
+    assert (
+        V_damping[flutter_index[0] - 1, flutter[0]["mode"] - 1] > 0.0
+        and V_damping[flutter_index[0], flutter[0]["mode"] - 1] <= 0.0
+    )
+    divergence_index = np.argwhere(np.isclose(V, divergence[0]["V"]))
+    assert (
+        V_damping[divergence_index[0] - 1, divergence[0]["mode"] - 1] > 0.0
+        and V_damping[divergence_index[0], divergence[0]["mode"] - 1] <= 0.0
+    )
+
+    freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
+        file="ccx_normal_modes_matout",
+        folder="outputs/test_mat_out/test_simple_plate_0_0_90",
+        aero_inputs=PLATE_AERO,
+        k_modes=16,
+    )
+    assert flutter == [{"mode": 2, "V": 26.5}]
+    assert divergence == [{"mode": 1, "V": 32.5}]
 
     # box model normal modes checks
     freq_scipy = main(file="ccx_normal_modes_matout", folder="outputs/test_mat_out")
