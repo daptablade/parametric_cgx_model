@@ -9,8 +9,7 @@ from pathlib import Path
 import csv
 
 from utils import timeit
-from strip_theory_aerodynamics import AeroModel, AERO_INPUTS
-from parametric_box import INPUTS
+from strip_theory_aerodynamics import AeroModel
 
 # For interactive session debugging:
 # np.set_printoptions(precision=3, linewidth=200)
@@ -34,6 +33,23 @@ PLATE_AERO = {
     "mode_tracking_threshold": 0.60,
     "CL_alpha": 2 * np.pi,  # ideal lift curve slope
 }
+
+BOX_AERO = {
+    "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
+    "strips": 10,  # number of aero strips along the span >=1
+    "root_alpha": 10,  # AoA at the wing root in degrees
+    "rho": 1.225,  # air density in Pa
+    "V": {
+        "start": 1.0,
+        "end": 150.0,
+        "inc0": 5.0,
+        "inc_min": 0.01,
+    },  # air velocity range in m/s
+    "mode_tracking_threshold": 0.60,
+    "CL_alpha": 2 * np.pi,  # ideal lift curve slope
+}
+
+DEBUG_MODE_TRACKING_FLAG = False
 
 
 def read_matrix_csv(file, delimiter=" ", skip_lines_with=None, read_only=None):
@@ -69,7 +85,6 @@ def read_matrix_csv(file, delimiter=" ", skip_lines_with=None, read_only=None):
     return np.array(data)
 
 
-@timeit
 def get_matrix(data, filter_out_rows=None):
 
     mask = np.ones(len(data), dtype=bool)
@@ -107,7 +122,6 @@ def get_rows_from_dofs(dofs, lookup):
     return rows
 
 
-@timeit
 def get_normal_modes(problem, k=10):
     # solve an eigenvalue problem to obtain 10 lowest eigenvalues
     # evals_small, evecs_small = eigs(
@@ -444,7 +458,8 @@ def get_mode_order(macxp, threshold=0.6, dthreashold=0.6):
                 # this mode has already been alocated a mode_id
                 continue
             elif np.abs(mode[index[0]] - threshold) <= dthreashold:
-                print(f"Mode tracking threshold set to {mode[index[0]]}.")
+                if DEBUG_MODE_TRACKING_FLAG:
+                    print(f"Mode tracking threshold set to {mode[index[0]]}.")
             elif mode[index[0]] - threshold < -dthreashold:
                 break
             elif mode[index[0]] - threshold > dthreashold:
@@ -482,7 +497,6 @@ def plot_histories(inputs):
         plt.close()
 
 
-@timeit
 def get_complex_aero_modes(
     problem, rho, Vdict, k=10, plot_flag=False, folder=None, threshold=0.55
 ):
@@ -532,7 +546,7 @@ def get_complex_aero_modes(
                 mu_model1=mu_model1,
                 mu_model2=mu_model2,
                 v=velocity,
-                plot_flag=plot_flag,
+                plot_flag=DEBUG_MODE_TRACKING_FLAG,
                 figure_name=str(Path(folder, "macxp.png")),
                 threshold=threshold,
             )
@@ -681,7 +695,6 @@ def get_complex_aero_modes(
     return V, V_omega, V_damping, V_eig, V_mode_id, flutter, divergence
 
 
-@timeit
 def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
 
     # dofs that are constrained
@@ -839,12 +852,13 @@ def parametric_box_tests():
 
     *2) is not stricly required, but provides ccx normal mode eigenvalues for comparison.
     """
+    from parametric_box import INPUTS
 
     # box model aerelastic analysis
     freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
         file="ccx_normal_modes_matout",
         folder="test_data/test_eigenvalue_analysis/composite_wing",
-        aero_inputs=AERO_INPUTS[1],
+        aero_inputs=BOX_AERO,
         box_inputs=INPUTS[1],
         k_modes=10,
     )

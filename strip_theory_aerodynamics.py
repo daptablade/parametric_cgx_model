@@ -3,8 +3,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from parametric_box import INPUTS, PLOT_FLAG
 from context import PRECICE_FOLDER
+
+PLOT_FLAG = False
 
 AERO_INPUTS = [
     {
@@ -15,21 +16,7 @@ AERO_INPUTS = [
         "V": 5.0,  # air velocity in m/s
         "CL_alpha": 2 * np.pi,  # ideal lift curve slope
         "precice_folder": PRECICE_FOLDER,
-    },
-    {
-        "planform": None,  # from box model - or {"A":[0,0,0], "B":[0,2.0,0], "CA":0.2, "CB":0.2}
-        "strips": 10,  # number of aero strips along the span >=1
-        "root_alpha": 10,  # AoA at the wing root in degrees
-        "rho": 1.225,  # air density in Pa
-        "V": {
-            "start": 1.0,
-            "end": 150.0,
-            "inc0": 5.0,
-            "inc_min": 0.01,
-        },  # air velocity range in m/s
-        "mode_tracking_threshold": 0.60,
-        "CL_alpha": 2 * np.pi,  # ideal lift curve slope
-    },
+    }
 ]
 
 
@@ -272,5 +259,7 @@ def _write_to_file(file, data):
 
 
 if __name__ == "__main__":
+    from parametric_box import INPUTS
+
     # # use this for flexible wing forces calculation from FEM displacements
     main(AERO_INPUTS[0], INPUTS[1])
