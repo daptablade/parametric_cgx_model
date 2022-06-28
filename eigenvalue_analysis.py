@@ -10,6 +10,7 @@ import csv
 
 from utils import timeit
 from strip_theory_aerodynamics import AeroModel, AERO_INPUTS
+from parametric_box import INPUTS
 
 # For interactive session debugging:
 # np.set_printoptions(precision=3, linewidth=200)
@@ -232,7 +233,7 @@ def get_aero_evects(
     # interpolate aero eigenvectors
     aero_evecs = np.zeros([len(aeronodes), reduced_evecs.shape[1]])
     for index, evect in enumerate(reduced_evecs.transpose()):
-        f = LinearNDInterpolator((X, Y), evect)
+        f = LinearNDInterpolator((X, Y), evect, fill_value=0.0)
         for nodeid, node in enumerate(aeronodes):
             aero_evecs[nodeid, index] = f(node[0], node[1])
 
@@ -453,12 +454,12 @@ def get_mode_order(macxp, threshold=0.6, dthreashold=0.6):
             mode_ids[index] = mcounter
             mcounter += 1
 
-    if all(mode_ids > 0.0):
+    if all(mode_ids > 0.0) and all(mode_ids <= modes / 2):
         # mode ordering successful
         return mode_ids, True
     else:
         # mode ordering failed
-        return None, False
+        return mode_ids, False
 
 
 def plot_histories(inputs):
@@ -559,6 +560,11 @@ def get_complex_aero_modes(
                         "No convergence of the mode tracking: max number of iterations reached."
                     )
                     break
+                elif not all(mode_order <= macxp.shape[0] / 2):
+                    print(
+                        f"Mode tracking failed at V={velocity} likely due to mode moving outside tracked range. Request more modes."
+                    )
+                    break
 
                 print(f"Cut-back velocity increment to {vinc} m/z.")
 
@@ -575,49 +581,58 @@ def get_complex_aero_modes(
                     print(f"Reset velocity increment to {vinc} m/s.")
 
         if tracked:
-            for mode in np.unique(V_mode_id[index, :]):
-                ii = np.argwhere(V_mode_id[index, :] == mode)
-                col = int(mode - 1)
-                # reorder the eigenvalue output by ascending mode number (for plotting)
-                V_eig[index, int((mode - 1) * 2)] = evals_small[ii[0]]
-                V_eig[index, int((mode - 1) * 2 + 1)] = evals_small[ii[1]]
-                V_eigv_memory[:, int((mode - 1) * 2)] = evecs_small[k:, ii[0]].flatten()
-                V_eigv_memory[:, int((mode - 1) * 2 + 1)] = evecs_small[
-                    k:, ii[1]
-                ].flatten()
-                if np.isclose(np.conj(evals_small[ii[0]]), evals_small[ii[1]]):
-                    # underdamped mode - complex conjugate modes
-                    e = evals_small[ii[0]]
-                    omega = np.abs(e)  # rads
-                    V_omega[index, col] = omega / (2 * np.pi)  # Hz
-                    V_damping[index, col] = -1.0 * e.real / omega * 100
-                    if V_damping[index, col] <= 0:
-                        V_flutter[index, col] = True
-                        if index == 0 or V_flutter[index - 1, col] == False:
-                            flutter.append({"mode": int(mode), "V": velocity})
-                else:
-                    # critically or overdamped mode
-                    e = evals_small[ii]
-                    V_omega[index, col] = 0.0  # Hz
-                    V_damping[index, col] = np.min(-1.0 * e.real / np.abs(e) * 100)
-                    if V_damping[index, col] <= 0:
-                        V_divergence[index, col] = True
-                        if index == 0 or V_divergence[index - 1, col] == False:
-                            divergence.append({"mode": int(mode), "V": velocity})
+            try:
+                for mode in np.unique(V_mode_id[index, :]):
+                    ii = np.argwhere(V_mode_id[index, :] == mode)
+                    col = int(mode - 1)
+                    # reorder the eigenvalue output by ascending mode number (for plotting)
+                    V_eig[index, int((mode - 1) * 2)] = evals_small[ii[0]]
+                    V_eig[index, int((mode - 1) * 2 + 1)] = evals_small[ii[1]]
+                    V_eigv_memory[:, int((mode - 1) * 2)] = evecs_small[
+                        k:, ii[0]
+                    ].flatten()
+                    V_eigv_memory[:, int((mode - 1) * 2 + 1)] = evecs_small[
+                        k:, ii[1]
+                    ].flatten()
+                    if np.isclose(np.conj(evals_small[ii[0]]), evals_small[ii[1]]):
+                        # underdamped mode - complex conjugate modes
+                        e = evals_small[ii[0]]
+                        omega = np.abs(e)  # rads
+                        V_omega[index, col] = omega / (2 * np.pi)  # Hz
+                        V_damping[index, col] = -1.0 * e.real / omega * 100
+                        if V_damping[index, col] <= 0:
+                            V_flutter[index, col] = True
+                            if index == 0 or V_flutter[index - 1, col] == False:
+                                flutter.append({"mode": int(mode), "V": velocity})
+                    else:
+                        # critically or overdamped mode
+                        e = evals_small[ii]
+                        V_omega[index, col] = 0.0  # Hz
+                        V_damping[index, col] = np.min(-1.0 * e.real / np.abs(e) * 100)
+                        if V_damping[index, col] <= 0:
+                            V_divergence[index, col] = True
+                            if index == 0 or V_divergence[index - 1, col] == False:
+                                divergence.append({"mode": int(mode), "V": velocity})
+                V.append(velocity)
+                print(f"V={velocity}m/s step completed.")
+                velocity += vinc
+                index += 1
 
-            V.append(velocity)
-            print(f"V={velocity}m/s step completed.")
-            velocity += vinc
-            index += 1
+            except Exception as err:
+                print("ERROR - Exiting aeroelastic stability analysis.")
+                print(f"Caught error: {err=}, {type(err)=}")
+                V.append(velocity)
+                incV_flag = False
         else:
             incV_flag = False
+            print("Warning: Exiting aeroelastic stability analysis.")
 
         if velocity >= Vdict["end"]:
             incV_flag = False
+            print("Completed aeroelastic stability analysis.")
 
     print("Flutter modes:", flutter)
     print("Divergence modes:", divergence)
-    print("Completed aeroelastic stability analysis.")
 
     if plot_flag:
         colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -746,12 +761,22 @@ def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
         return omega
 
 
-if __name__ == "__main__":
+def simple_plate_tests():
+    """Fast tests using a simple cantelevered flat plate model.
+    NOTE: Requires mesh and CCX analysis output. Steps to generate these:
+    1) cd "folder"
+    2) cgx_2.19 -bg cgx_infile.fdb
+    3) open all.msh file in editor and change element type from S8 to S8R
+    4) ccx_2.19 ccx_normal_modes*
+    5) ccx_2.19 ccx_normal_modes_matout
+
+    *4) is not stricly required, but provides ccx normal mode eigenvalues for comparison.
+    """
 
     # SIMPLE PLATE normal modes checks
     freq_scipy = main(
         file="ccx_normal_modes_matout",
-        folder="outputs/test_mat_out/test_simple_plate_0_-45_45",
+        folder="test_data/test_eigenvalue_analysis/composite_plate_0_-45_45",
         k_modes=15,
     )
     freq_ccx = np.array(
@@ -778,7 +803,7 @@ if __name__ == "__main__":
     # SIMPLE PLATE flutter analysis check
     freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
         file="ccx_normal_modes_matout",
-        folder="outputs/test_mat_out/test_simple_plate_0_-45_45",
+        folder="test_data/test_eigenvalue_analysis/composite_plate_0_-45_45",
         aero_inputs=PLATE_AERO,
         k_modes=16,
     )
@@ -797,27 +822,56 @@ if __name__ == "__main__":
 
     freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
         file="ccx_normal_modes_matout",
-        folder="outputs/test_mat_out/test_simple_plate_0_0_90",
+        folder="test_data/test_eigenvalue_analysis/composite_plate_0_0_90",
         aero_inputs=PLATE_AERO,
         k_modes=16,
     )
     assert flutter == [{"mode": 2, "V": 26.5}]
     assert divergence == [{"mode": 1, "V": 32.5}]
 
-    # box model normal modes checks
-    freq_scipy = main(file="ccx_normal_modes_matout", folder="outputs/test_mat_out")
+
+def parametric_box_tests():
+    """Slower tests using a composite parametric box wing model.
+    NOTE: Requires mesh and CCX analysis output. Steps to generate these:
+    1) cd "folder"
+    2) ccx_2.19 ccx_normal_modes*
+    3) ccx_2.19 ccx_normal_modes_matout
+
+    *2) is not stricly required, but provides ccx normal mode eigenvalues for comparison.
+    """
+
+    # box model aerelastic analysis
+    freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
+        file="ccx_normal_modes_matout",
+        folder="test_data/test_eigenvalue_analysis/composite_wing",
+        aero_inputs=AERO_INPUTS[1],
+        box_inputs=INPUTS[1],
+        k_modes=10,
+    )
     freq_ccx = np.array(
         [
-            0.8692880e01,
-            0.4375812e02,
-            0.5737775e02,
-            0.6076665e02,
-            0.9949578e02,
-            0.1538641e03,
-            0.1741874e03,
-            0.2012603e03,
-            0.2374603e03,
-            0.2688630e03,
+            0.6925236e01,
+            0.3730376e02,
+            0.4572749e02,
+            0.5929500e02,
+            0.8697576e02,
+            0.1345654e03,
+            0.1624646e03,
+            0.1728907e03,
+            0.1969553e03,
+            0.2176435e03,
         ]
     )
     assert np.allclose(freq_scipy, freq_ccx, rtol=1e-3)
+    assert flutter == [
+        {"mode": 2, "V": 116.0},
+        {"mode": 3, "V": 136.0},
+    ]
+    assert divergence == [{"mode": 1, "V": 96.0}]
+
+
+if __name__ == "__main__":
+
+    # run tests
+    simple_plate_tests()
+    parametric_box_tests()

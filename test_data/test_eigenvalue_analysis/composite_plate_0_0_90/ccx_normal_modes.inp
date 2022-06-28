@@ -1,0 +1,28 @@
+*HEADING
+Model: Unsuported composite box normal modes
+**********************
+** NODES AND ELEMENTS
+*INCLUDE,INPUT=all.msh
+**********************
+** COMPOSITE PROPERTIES
+*MATERIAL,NAME=EL
+*ELASTIC, TYPE =ENGINEERING CONSTANTS
+98.0E9,7.9E9,7.9E9,0.28,0.3,0.3,5.6E9,5.6E9,
+5.6E9,20.0
+*DENSITY
+1520.0
+*INCLUDE,INPUT=composite_shell.inp
+**********************
+** BOUNDARY CONDITIONS AND LOAD SET
+*BOUNDARY
+*INCLUDE,INPUT=SPC_123456.bou
+**********************
+*STEP
+*STATIC
+*FREQUENCY
+15
+*NODE FILE 
+U
+*NODE PRINT
+U
+*END STEP
