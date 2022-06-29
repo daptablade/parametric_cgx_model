@@ -29,6 +29,9 @@ from scipy.spatial.transform import Rotation
 
 from context import PRECICE_FOLDER
 
+# for interactive session debug
+np.set_printoptions(precision=3, linewidth=200)
+
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
     "CGX": "wsl cgx_2.19",
@@ -133,7 +136,16 @@ INPUTS = [
         "shell_set_name": {"ribs": "ERIBS", "aero": "EAERO"},
         "composite_props_file": "composite_shell.inp",
         "mesh_file": "all.msh",
-        "boundary_conditions": {"fix_lines": None, "loaded_lines": None},
+        "boundary_conditions": {
+            "fix_lines": None,
+            "loaded_lines": None,
+            "fix_nodes": [
+                {"x": [0.1, 0.12], "y": [0.59, 0.61], "z": [-0.1, 0.1]},
+                {"x": [0.1, 0.12], "y": [0.66, 0.68], "z": [-0.1, 0.1]},
+                {"x": [0.1, 0.12], "y": [1.32, 1.34], "z": [-0.1, 0.1]},
+                {"x": [0.1, 0.12], "y": [1.40, 1.42], "z": [-0.1, 0.1]},
+            ],
+        },
         "process_flags": {"run_post": False, "delete_run_folder": False},
     },
     {
@@ -211,6 +223,24 @@ def main(inputs):
 
     if "composite_layup" in inputs:
         get_composite_properties_input(inputs, run_folder)
+
+    if "boundary_conditions" in inputs and "fix_nodes" in inputs["boundary_conditions"]:
+
+        assert (
+            inputs["cgx_solver"] == "abq"
+        ), "Only calculix mesh format can be read at the moment."
+
+        # read the mesh input file, select nodes to constrain and output spc node set to file
+        nodes = read_matrix_csv(
+            file=Path(run_folder, inputs["mesh_file"]),
+            delimiter=",",
+            skip_lines_with="*",
+            read_only="*NODE",
+        )
+        node_ids = filter_nodes_by_xyz(
+            nodes, ranges=inputs["boundary_conditions"]["fix_nodes"]
+        )
+        write_node_spc_to_file(nodes=node_ids, file=Path(run_folder, "SPC_123456.bou"))
 
     if (
         "precice_inout" in inputs["process_flags"]
@@ -1242,6 +1272,78 @@ def read_from_file(file):
         return array
     except Exception as error:
         print("Could not read solver input file - " + error)
+
+
+def read_matrix_csv(file, delimiter=" ", skip_lines_with=None, read_only=None):
+    """Reads csv and strips empty entries."""
+
+    if read_only is None:
+        read_flag = True
+    else:
+        read_flag = False
+
+    with open(file, newline="") as csvfile:
+        reader = csv.reader(csvfile, delimiter=delimiter)
+        if skip_lines_with is None and read_flag:
+            data = [[float(val) for val in row if bool(val.strip())] for row in reader]
+        elif skip_lines_with and read_flag:
+            data = [
+                [float(val) for val in row if bool(val.strip())]
+                for row in reader
+                if not skip_lines_with in row[0]
+            ]
+        elif not read_flag:
+            data = []
+            for row in reader:
+                if not read_flag and read_only in row[0]:
+                    read_flag = True
+                    continue
+                elif read_flag and skip_lines_with in row[0]:
+                    read_flag = False
+                    break
+                elif read_flag:
+                    data.append([float(val) for val in row if bool(val.strip())])
+
+    return np.array(data)
+
+
+def filter_nodes_by_xyz(nodes, ranges):
+
+    nodes_in_range = np.empty([0, 4], dtype=float)
+    for xyz_range in ranges:
+        dx = xyz_range["x"]
+        dy = xyz_range["y"]
+        dz = xyz_range["z"]
+
+        nodes_in_range = np.vstack(
+            [
+                nodes_in_range,
+                nodes[
+                    np.where(
+                        (nodes[:, 1] >= dx[0])
+                        & (nodes[:, 1] <= dx[1])
+                        & (nodes[:, 2] >= dy[0])
+                        & (nodes[:, 2] <= dy[1])
+                        & (nodes[:, 3] >= dz[0])
+                        & (nodes[:, 3] <= dz[1])
+                    ),
+                    :,
+                ][0],
+            ]
+        )
+
+    return nodes_in_range[:, 0]
+
+
+def write_node_spc_to_file(nodes, file):
+
+    cards = ["** BOUNDARY defined by 'fix_nodes' parametric box input parameter."]
+    for dof in range(1, 7):
+        for node in nodes:
+            cards.append(f"{int(node)}, {dof}, ,")
+
+    with open(file, "w", encoding="utf-8") as f:
+        f.write("\n".join(cards))
 
 
 def write_to_file(file, data):

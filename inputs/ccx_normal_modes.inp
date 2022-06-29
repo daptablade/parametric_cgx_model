@@ -19,9 +19,8 @@ Model: Unsuported composite box normal modes
 *SOLID SECTION,MATERIAL=Foam,ELSET=CORE
 **********************
 ** BOUNDARY CONDITIONS AND LOAD SET
-** *BOUNDARY
-** *INCLUDE,INPUT=SPC_123456.bou
-** *INCLUDE,INPUT=LAST.nam
+*BOUNDARY
+*INCLUDE,INPUT=SPC_123456.bou
 **********************
 ** ELEMENT SETS
 *INCLUDE,INPUT=RIBS.nam
