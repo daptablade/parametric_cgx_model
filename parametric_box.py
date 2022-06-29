@@ -924,7 +924,12 @@ def _get_commands(
     merge_tol=0.001,
     cgx_ele_type=10,
     solver="abq",
+    max_entries_per_line=9,
 ):
+    def divide_chunks(l, n):
+        # looping till length l
+        for i in range(0, len(l), n):
+            yield l[i : i + n]
 
     commands = []
 
@@ -1002,16 +1007,19 @@ def _get_commands(
     commands.append("# =============== \n")
     # SPC and load sets
     if fix_lines:
+        for chunk in divide_chunks(fix_lines, max_entries_per_line):
         commands.append(
-            "SETA SPC l " + " ".join([f"L{line:05d}" for line in fix_lines]) + "\n"
+                "SETA SPC l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
         )
     if loaded_lines:
+        for chunk in divide_chunks(loaded_lines, max_entries_per_line):
         commands.append(
-            "SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
+                "SETA LAST l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
         )
     if loaded_surfaces:
+        for chunk in divide_chunks(loaded_surfaces, max_entries_per_line):
         commands.append(
-            "SETA TOP s " + " ".join([f"V{id:05d}" for id in loaded_surfaces]) + "\n"
+                "SETA TOP s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
         )
 
     commands.append("# =============== \n")
@@ -1023,12 +1031,14 @@ def _get_commands(
     commands.append("")
     # sets of surfaces
     if rib_ids:
+        for chunk in divide_chunks(rib_ids, max_entries_per_line):
         commands.append(
-            "SETA RIBS s " + " ".join([f"V{id:05d}" for id in rib_ids]) + "\n"
+                "SETA RIBS s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
         )
     if aero_ids:
+        for chunk in divide_chunks(aero_ids, max_entries_per_line):
         commands.append(
-            "SETA AERO s " + " ".join([f"V{id:05d}" for id in aero_ids]) + "\n"
+                "SETA AERO s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
         )
 
     commands.append("# =============== \n")
