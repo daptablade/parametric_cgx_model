@@ -31,8 +31,8 @@ from context import PRECICE_FOLDER
 
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
-    "CGX": "wsl /usr/local/bin/cgx_2.15",
-    "CALCULIX": "wsl /usr/local/bin/ccx_2.19",
+    "CGX": "wsl cgx_2.19",
+    "CALCULIX": "wsl ccx_2.19",
     "NASTRAN": "nastran",  # set to None if not installed
 }
 
@@ -100,16 +100,16 @@ INPUTS = [
         "process_flags": {"run_post": True, "delete_run_folder": False},
     },
     {
-        "span": [0.085, 1.83, 0.085],
-        "chord": [0.38, 0.38, 0.38],
-        "filled_sections_flags": [True, False, True],
+        "span": [0.085, 0.507, 0.085, 0.646, 0.085, 0.507, 0.085],
+        "chord": [0.38, 0.38, 0.38, 0.38, 0.38, 0.38, 0.38],
+        "filled_sections_flags": [True, False, True, False, True, False, True],
         "inputs_folder": "inputs",
         "output_folder": Path(os.getcwd(), "outputs"),
         "airfoil_csv_file": "naca4418.csv",
         "airfoil_cut_chord_percentages": [5, 95],
         "analysis_file": "ccx_normal_modes",  # specify without file extension for CALCULIX
         "nele_foil": [4, 10, 2, 2, 10, 4],
-        "nele_span": [4, 40, 4],
+        "nele_span": [4, 10, 4, 10, 4, 10, 4],
         "node_merge_tol": 0.00002,
         "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
         "cgx_solver": "abq",  # or "nas"
@@ -834,7 +834,12 @@ def _get_commands(
     merge_tol=0.001,
     cgx_ele_type=10,
     solver="abq",
+    max_entries_per_line=9,
 ):
+    def divide_chunks(l, n):
+        # looping till length l
+        for i in range(0, len(l), n):
+            yield l[i : i + n]
 
     commands = []
 
@@ -912,17 +917,20 @@ def _get_commands(
     commands.append("# =============== \n")
     # SPC and load sets
     if fix_lines:
-        commands.append(
-            "SETA SPC l " + " ".join([f"L{line:05d}" for line in fix_lines]) + "\n"
-        )
+        for chunk in divide_chunks(fix_lines, max_entries_per_line):
+            commands.append(
+                "SETA SPC l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
+            )
     if loaded_lines:
-        commands.append(
-            "SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
-        )
+        for chunk in divide_chunks(loaded_lines, max_entries_per_line):
+            commands.append(
+                "SETA LAST l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
+            )
     if loaded_surfaces:
-        commands.append(
-            "SETA TOP s " + " ".join([f"V{id:05d}" for id in loaded_surfaces]) + "\n"
-        )
+        for chunk in divide_chunks(loaded_surfaces, max_entries_per_line):
+            commands.append(
+                "SETA TOP s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
+            )
 
     commands.append("# =============== \n")
     # surface meshes
@@ -933,13 +941,15 @@ def _get_commands(
     commands.append("")
     # sets of surfaces
     if rib_ids:
-        commands.append(
-            "SETA RIBS s " + " ".join([f"V{id:05d}" for id in rib_ids]) + "\n"
-        )
+        for chunk in divide_chunks(rib_ids, max_entries_per_line):
+            commands.append(
+                "SETA RIBS s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
+            )
     if aero_ids:
-        commands.append(
-            "SETA AERO s " + " ".join([f"V{id:05d}" for id in aero_ids]) + "\n"
-        )
+        for chunk in divide_chunks(aero_ids, max_entries_per_line):
+            commands.append(
+                "SETA AERO s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
+            )
 
     commands.append("# =============== \n")
     # body meshes
@@ -1269,4 +1279,4 @@ def _plot_forces_ditribution(nodes, forces):
 
 
 if __name__ == "__main__":
-    main(INPUTS[3])
+    main(INPUTS[2])
