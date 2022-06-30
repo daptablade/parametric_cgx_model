@@ -3,8 +3,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from parametric_box import INPUTS, PLOT_FLAG
 from context import PRECICE_FOLDER
+
+PLOT_FLAG = False
 
 AERO_INPUTS = [
     {
@@ -15,7 +16,7 @@ AERO_INPUTS = [
         "V": 5.0,  # air velocity in m/s
         "CL_alpha": 2 * np.pi,  # ideal lift curve slope
         "precice_folder": PRECICE_FOLDER,
-    },
+    }
 ]
 
 
@@ -258,5 +259,7 @@ def _write_to_file(file, data):
 
 
 if __name__ == "__main__":
+    from parametric_box import INPUTS
+
     # # use this for flexible wing forces calculation from FEM displacements
     main(AERO_INPUTS[0], INPUTS[1])

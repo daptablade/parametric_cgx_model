@@ -1,10 +1,11 @@
 """
 Parametric shell half-wing model geometry creation and meshing in CGX,
-followed by FEA analysis (using NASTRAN or CALCULIX).
+followed by FEA analysis (using NASTRAN or CALCULIX) and further post-processing.
+From V0.0.5 also includes modal aeroelalastic analysis capability - see INPUT[4].
 
 The script assumes that CGX, CCX and nastran are installed and working.
 Adjust the executable calls as needed in LOCAL_EXECUTES.
-Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses
+Nastran or CalculiX CrunchiX (CCX) are only required if you want to run FEM analyses
 (see References in README file).
 
 Execute the python script 'parametric_box.py' and inspect outputs:
@@ -12,6 +13,9 @@ choose between
 >> main(INPUT[0]) for a metallic Nastran model
 >> main(INPUT[1]) for a composite Calculix model
 >> main(INPUT[2]) for a multisection composite Calculix model with core
+>> main(INPUT[3]) for a composite Calculix model static analysis as used by PreciCE
+>> main(INPUT[4]) for a composite Calculix model modal aeroelastic analysis
+
 """
 
 # import external libraries
@@ -28,11 +32,14 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
 from context import PRECICE_FOLDER
+from eigenvalue_analysis import main as modal_aeroelastic
+from eigenvalue_analysis import BOX_AERO
+from utils import timeit
 
 # set these execution paths to local binaries as available
 LOCAL_EXECUTES = {
-    "CGX": "wsl /usr/local/bin/cgx_2.15",
-    "CALCULIX": "wsl /usr/local/bin/ccx_2.19",
+    "CGX": "wsl cgx_2.19",
+    "CALCULIX": "wsl ccx_2.19",
     "NASTRAN": "nastran",  # set to None if not installed
 }
 
@@ -186,9 +193,56 @@ INPUTS = [
             "precice_inout": True,
         },
     },
+    {
+        "span": 2.0,
+        "chord": 0.2,
+        "filled_sections_flags": False,
+        "inputs_folder": "inputs",
+        "output_folder": Path(os.getcwd(), "outputs"),
+        "airfoil_csv_file": "naca0012.csv",
+        "analysis_file": "ccx_normal_modes_matout",  # specify without file extension for CALCULIX
+        "nele_foil": [10, 10],
+        "nele_span": 40,
+        "node_merge_tol": 0.002,
+        "cgx_ele_type": 10,  # 9: S4, 10: S8 (linear or quadratic elements)
+        "cgx_solver": "abq",  # or "nas"
+        "fea_solver": "CALCULIX",  # or "NASTRAN"
+        "composite_plies": [
+            {
+                "id": "p_0",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_0",
+            },
+            {
+                "id": "p_90",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_90",
+            },
+        ],
+        "orientations": [
+            {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
+            {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
+        ],
+        "composite_layup": {
+            "aero": (["p_90"] + ["p_0"] + ["p_90"] * 2 + ["p_0"] + ["p_90"]),
+        },
+        "shell_set_name": {"aero": "Eall"},
+        "composite_props_file": "composite_shell.inp",
+        "mesh_file": "all.msh",
+        "boundary_conditions": {"fix_lines": [0, 1], "loaded_lines": []},
+        "process_flags": {
+            "run_post": False,
+            "delete_run_folder": False,
+            "run_modal_aeroelastic": True,
+        },
+        "modal_aeroelastic_parameters": {"aero_inputs": BOX_AERO, "k_modes": 10},
+    },
 ]
 
 
+@timeit
 def main(inputs):
     """Create a box FEM model from parametric inputs."""
 
@@ -274,6 +328,28 @@ def main(inputs):
             readf=run_folder / (inputs["analysis_file"] + ".dat"),
             writef=Path(inputs["precice_folder"], "solver_2_displacements.txt"),
         )
+
+    if (
+        "run_modal_aeroelastic" in inputs["process_flags"]
+        and inputs["process_flags"]["run_modal_aeroelastic"]
+    ):
+        print("Starting modal aeroelastic stability analysis.")
+        # run aeroelastic stability analysis over a range of velocities
+        freq_scipy, V, V_omega, V_damping, flutter, divergence = modal_aeroelastic(
+            file=inputs["analysis_file"],
+            folder=run_folder,
+            aero_inputs=inputs["modal_aeroelastic_parameters"]["aero_inputs"],
+            box_inputs=inputs,
+            k_modes=inputs["modal_aeroelastic_parameters"]["k_modes"],
+        )
+        outputs = {
+            "normal_modes_freg_Hz": freq_scipy,
+            "v_range": V,
+            "V_omega": V_omega,
+            "V_damping": V_damping,
+            "flutter": flutter,
+            "divergence": divergence,
+        }
 
     if inputs["process_flags"]["delete_run_folder"]:
         # delete the run folder (recommend setting to True for optimisation)
@@ -1269,4 +1345,4 @@ def _plot_forces_ditribution(nodes, forces):
 
 
 if __name__ == "__main__":
-    main(INPUTS[3])
+    main(INPUTS[4])
