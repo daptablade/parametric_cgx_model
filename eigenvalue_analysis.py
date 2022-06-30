@@ -737,7 +737,7 @@ def _get_aero_component_matrices(aeromodel, aero_evecs):
 
 
 def _get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25):
-    """Modified strip theory aero damping, with a quasi-static Mtheta_dot term and
+    """Modified strip theory aero damping, with a constant Mtheta_dot term and
     e being a load excentricity factor corresponding to the ratio of the flexural
     axis offset from the aerodynamic centre to the chord length."""
 

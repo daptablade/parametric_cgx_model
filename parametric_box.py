@@ -1,10 +1,11 @@
 """
 Parametric shell half-wing model geometry creation and meshing in CGX,
-followed by FEA analysis (using NASTRAN or CALCULIX).
+followed by FEA analysis (using NASTRAN or CALCULIX) and further post-processing.
+From V0.0.5 also includes modal aeroelalastic analysis capability - see INPUT[4].
 
 The script assumes that CGX, CCX and nastran are installed and working.
 Adjust the executable calls as needed in LOCAL_EXECUTES.
-Nastran or CalculiX CrunchiX are only required if you want to run FEM analyses
+Nastran or CalculiX CrunchiX (CCX) are only required if you want to run FEM analyses
 (see References in README file).
 
 Execute the python script 'parametric_box.py' and inspect outputs:
@@ -12,6 +13,9 @@ choose between
 >> main(INPUT[0]) for a metallic Nastran model
 >> main(INPUT[1]) for a composite Calculix model
 >> main(INPUT[2]) for a multisection composite Calculix model with core
+>> main(INPUT[3]) for a composite Calculix model static analysis as used by PreciCE
+>> main(INPUT[4]) for a composite Calculix model modal aeroelastic analysis
+
 """
 
 # import external libraries

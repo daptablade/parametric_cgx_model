@@ -9,7 +9,8 @@ Core engineering simulation processes explored include:
 * Geometry creation and meshing in CalculiX GraphiX
 * FEA analysis (using Nastran or CalculiX CrunchiX) and analysis output recovery and processing (implemented for CalculiX CrunchiX only).
 * Design optimisation using OpenMDAO
-* Coupling of disciplinary analyses (here: structures and aero) using preCICE  
+* Coupling of disciplinary analyses (here: structures and aero) for static analysis using preCICE  
+* Calculate the aeroelastic flutter and divergence velocities from FEA exported stiffness and mass matrices and a simple unsteady aero model
 
 The script assumes that CalculiX GraphiX / CrunchiX, Nastran (optional) and preCICE (optional) are installed and working.
 Adjust the executable calls as needed, for example in [parametric_box.py](./parametric_box.py) global variable `LOCAL_EXECUTES`.
@@ -25,6 +26,8 @@ Corresponding code release: [v0.0.1](https://github.com/daptablade/parametric_cg
 Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.3)
 * 24/03/2022: [Multidisciplinary analysis with Python, PreCICE and Calculix Crunchix](https://www.dapta.com/multidisciplinary-analysis-with-python-precice-and-calculix-crunchix/) 
 Corresponding code release: [v0.0.4](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.4)
+* 30/06/2022: [Dynamic aeroelastic flutter and divergence analysis with Python and Calculix Crunchix](https://www.dapta.com/dynamic-aeroelastic-flutter-and-divergence-analysis-with-python-and-calculix-crunchix)
+Corresponding code release: [v0.0.5](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.5)
 
 ## Quick Start
 
