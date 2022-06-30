@@ -1,3 +1,25 @@
+"""
+Solve the structural vibration problem and the aeroelastic stability problem as 
+eigenvalue problems.
+
+Look at the main() function to understand the data flow. 
+
+The script assumes that Calculix (ccx) was already exectuted to output the FEM mass 
+and stiffness matrices, which are read-in at the start of the main() function. 
+
+The aerodynamic stiffness and damping matrices are calculated using simple 
+modified strip theory equations, which include tip effects on the lift distribution 
+and assume a constant Mtheta_dot term (-1.2).   
+
+Execute this module to run simple test cases for a composite plate model and for 
+a higher order box model. Note: CCX input files are included in the git folder, 
+but you may need to run CCX to generate the required .mas and .sti output files, 
+before exeturing this moodule. Step by step instruction are in the test case functions:
+simple_plate_tests()
+parametric_box_tests():
+
+"""
+
 from typing import Counter
 from scipy.sparse import csr_matrix, csc_matrix, bmat, eye
 from scipy.sparse.linalg import eigsh, eigs, inv
@@ -52,663 +74,20 @@ BOX_AERO = {
 DEBUG_MODE_TRACKING_FLAG = False
 
 
-def read_matrix_csv(file, delimiter=" ", skip_lines_with=None, read_only=None):
-    """Reads csv and strips empty entries."""
-
-    if read_only is None:
-        read_flag = True
-    else:
-        read_flag = False
-
-    with open(file, newline="") as csvfile:
-        reader = csv.reader(csvfile, delimiter=delimiter)
-        if skip_lines_with is None and read_flag:
-            data = [[float(val) for val in row if bool(val.strip())] for row in reader]
-        elif skip_lines_with and read_flag:
-            data = [
-                [float(val) for val in row if bool(val.strip())]
-                for row in reader
-                if not skip_lines_with in row[0]
-            ]
-        elif not read_flag:
-            data = []
-            for row in reader:
-                if not read_flag and read_only in row[0]:
-                    read_flag = True
-                    continue
-                elif read_flag and skip_lines_with in row[0]:
-                    read_flag = False
-                    break
-                elif read_flag:
-                    data.append([float(val) for val in row if bool(val.strip())])
-
-    return np.array(data)
-
-
-def get_matrix(data, filter_out_rows=None):
-
-    mask = np.ones(len(data), dtype=bool)
-    if filter_out_rows:
-        # set the mask to false where the index is a filtered row
-        frows = []
-        for row in filter_out_rows:
-            # get the filtered row / col indices
-            index = np.sort(
-                np.hstack(
-                    [np.where(data[:, 0] == row)[0], np.where(data[:, 1] == row)[0]]
-                )
-            )
-            # index = np.sort(np.where(data[:,1] == row)[0])
-            if index.size > 0:
-                frows += index.tolist()
-        mask[frows] = False
-
-    # data array contains (row, col, val) in each row
-    m, n = np.max(data[:, :2], axis=0)
-    matrix = np.zeros((int(m), int(n)), dtype=np.float64)
-    for row in data[mask, :]:
-        matrix[int(row[0] - 1), int(row[1] - 1)] = row[2]
-    submatrix = np.where(np.any(matrix < 0, axis=1) | np.any(matrix > 0, axis=1))[0]
-    mat = matrix[np.reshape(submatrix, (-1, 1)), submatrix]
-    return csr_matrix(mat + np.tril(mat.T, k=-1))
-
-
-def get_rows_from_dofs(dofs, lookup):
-    rows = []
-    for dof in dofs:
-        index = np.where((lookup == dof).all(axis=1))[0] + 1
-        if index.size > 0:
-            rows.append(int(index))
-    return rows
-
-
-def get_normal_modes(problem, k=10):
-    # solve an eigenvalue problem to obtain 10 lowest eigenvalues
-    # evals_small, evecs_small = eigs(
-    #     problem["sti"], k=10, M=problem["mas"], sigma=0.0, which="LR"
-    # )
-    # # print frequencies in Hz
-    # omega = np.sqrt(evals_small) / (2 * np.pi)
-    # print("Normal modes frequencies (Hz): ", omega)
-
-    evals_small, evecs_small = eigsh(
-        problem["sti"], k=k, M=problem["mas"], sigma=0.0, which="LM"
-    )
-    # print frequencies in Hz
-    omega = np.sqrt(evals_small) / (2 * np.pi)
-    print("Normal modes frequencies (Hz): ", omega)
-
-    return omega, evals_small, evecs_small
-
-
-def filter_evec(node_ids, dirs, lookup, evecs):
-
-    mask = np.ones(len(lookup), dtype=bool)
-    for index, row in enumerate(lookup):
-        if not row[0] in node_ids or not row[1] in dirs:
-            mask[index] = False
-
-    filtered_evecs = evecs[mask, :]
-    filtered_dofs = lookup[mask, :]
-
-    return filtered_evecs, filtered_dofs
-
-
-def get_unique_evecs(filtered_evecs, filtered_dofs):
-
-    reduced_dofs = np.unique(filtered_dofs, axis=0)
-    reduced_evecs = np.zeros([len(reduced_dofs), filtered_evecs.shape[1]])
-    for index, dof in enumerate(reduced_dofs):
-        # get indices of repeated dofs
-        indices = np.where((filtered_dofs == dof).all(axis=1))[0]
-        reduced_evecs[index, :] = np.average(filtered_evecs[indices, :], axis=0)
-
-    return reduced_evecs, reduced_dofs
-
-
-def apply_boundary_conditions(reduced_evecs, reduced_dofs, fixed):
-
-    mask = np.zeros(len(reduced_dofs), dtype=bool)
-    frows = []
-    for row in fixed:
-        index = np.where((reduced_dofs == row).all(axis=1))[0]
-        # index = np.sort(np.where(data[:,1] == row)[0])
-        if index.size > 0:
-            frows += index.tolist()
-    mask[frows] = True
-
-    reduced_evecs[mask, :] = 0.0
-
-    return reduced_evecs
-
-
-def plot_modes(data_sets, modes="all"):
-
-    if modes == "all":
-        # one figure per eigenvector
-        modes = data_sets[0][2].shape[1]
-
-    for mode in range(modes):
-        fig = plt.figure()
-        ax = fig.add_subplot(projection="3d")
-        for data in data_sets:
-            ax.scatter(data[0], data[1], data[2][:, mode], label=data[3])
-            if data[3] == "AERO":
-                LE_indices = int(len(data[0]) / 2)
-                ax.plot3D(
-                    data[0][:LE_indices],
-                    data[1][:LE_indices],
-                    data[2][:LE_indices, mode],
-                    "grey",
-                )
-                ax.plot3D(
-                    data[0][LE_indices:],
-                    data[1][LE_indices:],
-                    data[2][LE_indices:, mode],
-                    "grey",
-                )
-        ax.set_xlabel("X, m")
-        ax.set_ylabel("Y, m")
-        ax.set_zlabel("Z, normalised")
-        ax.legend()
-
-    plt.show()
-
-
-def get_aero_evects(
-    evecs, lookup, nodes_xyz, aeronodes, fixed=None, dirs=[3], plot_flag=False
-):
-
-    # filter evecs to nodes xyz and dims only
-    filtered_evecs, filtered_dofs = filter_evec(
-        node_ids=nodes_xyz[:, 0].astype(int),
-        dirs=dirs,
-        lookup=lookup.astype(int),
-        evecs=evecs,
-    )
-
-    # average duplicate dofs
-    reduced_evecs, reduced_dofs = get_unique_evecs(
-        filtered_evecs, filtered_dofs.astype(int)
-    )
-
-    # set boundary conditions to zero
-    if not fixed is None:
-        reduced_evecs = apply_boundary_conditions(reduced_evecs, reduced_dofs, fixed)
-
-    # get xyz for all dof nodes
-    X = np.zeros([len(reduced_dofs)])
-    Y = np.zeros([len(reduced_dofs)])
-    for index, dof in enumerate(reduced_dofs):
-        node_index = np.where(nodes_xyz[:, 0] == dof[0])[0]
-        X[index] = nodes_xyz[node_index, 1]
-        Y[index] = nodes_xyz[node_index, 2]
-
-    # interpolate aero eigenvectors
-    aero_evecs = np.zeros([len(aeronodes), reduced_evecs.shape[1]])
-    for index, evect in enumerate(reduced_evecs.transpose()):
-        f = LinearNDInterpolator((X, Y), evect, fill_value=0.0)
-        for nodeid, node in enumerate(aeronodes):
-            aero_evecs[nodeid, index] = f(node[0], node[1])
-
-    # plot selected modes for visual check
-    if plot_flag:
-        plot_modes(
-            [
-                (X, Y, reduced_evecs, "FEM"),
-                (aeronodes[:, 0], aeronodes[:, 1], aero_evecs, "AERO"),
-            ]
-        )
-
-    return aero_evecs
-
-
-def get_chords_from_aero_dofs(aeromodel):
-    c = np.zeros([len(aeromodel.le_nodes), 1])
-    for ii in range(len(aeromodel.le_nodes)):
-        c[ii] = aeromodel.te_nodes[ii, 0] - aeromodel.le_nodes[ii, 0]
-    return c
-
-
-def get_lift_factor_from_aero_dofs(aeromodel, span):
-    aw = np.zeros([len(aeromodel.le_nodes), 1])
-    for ii in range(len(aeromodel.le_nodes)):
-        aw[ii] = aeromodel.aero_inputs["CL_alpha"] * (
-            1 - (aeromodel.le_nodes[ii, 1] / span) ** 3
-        )
-    return aw
-
-
-def get_phi(aero_evecs, option):
-
-    nnodes = int(aero_evecs.shape[0] / 2)
-    phi = np.zeros([nnodes, aero_evecs.shape[1]])
-    for index, col in enumerate(aero_evecs.T):
-        if option == "LEplusTE":
-            phi[:, index] = col[:nnodes] + col[nnodes:]
-        elif option == "LEminusTE":
-            phi[:, index] = col[:nnodes] - col[nnodes:]
-        else:
-            raise ValueError(f"Option {option} is not recognised.")
-    return phi
-
-
-def get_aero_component_matrices(aeromodel, aero_evecs):
-
-    # get component matrices
-    span = aeromodel._point_b[1]
-    nstrips = aeromodel.aero_inputs["strips"]
-    c = get_chords_from_aero_dofs(aeromodel)  # vector of length dof/2
-    aw = get_lift_factor_from_aero_dofs(aeromodel, span)  # vector of length dof/2
-    dy_strips = (
-        np.vstack([np.array([0.5]), np.ones([nstrips - 1, 1]), np.array([0.5])])
-        * span
-        / (nstrips + 1)
-    )  # vector of length dof/2
-
-    # matrices of dof/2 * n eigenvectors
-    phi_LEplusTE = get_phi(aero_evecs, option="LEplusTE")
-    phi_LEminusTE = get_phi(aero_evecs, option="LEminusTE")
-
-    return c, aw, dy_strips, phi_LEplusTE, phi_LEminusTE
-
-
-def get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25):
-    c, aw, dy_strips, phi_LEplusTE, phi_LEminusTE = get_aero_component_matrices(
-        aeromodel, aero_evecs
-    )
-    mat_size = aero_evecs.shape[1]
-    B_mat = np.zeros([mat_size, mat_size], dtype=np.float64)
-    for index in range(mat_size):
-        B_mat[index, :] = (
-            (1 / 8)
-            * phi_LEplusTE[:, index].transpose()
-            @ np.diag((c * aw * dy_strips)[:, 0])
-            @ phi_LEplusTE
-            - (e / 4)
-            * phi_LEminusTE[:, index].transpose()
-            @ np.diag((c * aw * dy_strips)[:, 0])
-            @ phi_LEplusTE
-            - (Mxi_dot / 8)
-            * phi_LEminusTE[:, index].transpose()
-            @ np.diag((c * dy_strips)[:, 0])
-            @ phi_LEminusTE
-        )
-
-    return csr_matrix(B_mat)
-
-
-def get_aero_stiffness(aeromodel, aero_evecs, e=0.25):
-    _, aw, dy_strips, phi_LEplusTE, phi_LEminusTE = get_aero_component_matrices(
-        aeromodel, aero_evecs
-    )
-    mat_size = aero_evecs.shape[1]
-    C_mat = np.zeros([mat_size, mat_size], dtype=np.float64)
-    for index in range(mat_size):
-        C_mat[index, :] = (1 / 4) * phi_LEplusTE[:, index].transpose() @ np.diag(
-            (aw * dy_strips)[:, 0]
-        ) @ phi_LEminusTE - (e / 2) * phi_LEminusTE[:, index].transpose() @ np.diag(
-            (aw * dy_strips)[:, 0]
-        ) @ phi_LEminusTE
-
-    return csr_matrix(C_mat)
-
-
-def get_system_matrix(problem, rho, V):
-    """Define the modal aeroelastic system matrix Q.
-    Ref: Olivia Stodieck, Aeroelastic Tailoring of Tow-steered Composite Wings, Phd Thesis 2016
-    """
-
-    M = problem["M"]
-    K = problem["K"]
-    B = problem["B"]
-    C = problem["C"]
-    Q = bmat(
-        [
-            [None, eye(M.shape[0], dtype=np.float64)],
-            [-inv(M) @ (K + rho * V**2 * C), -inv(M) @ (rho * V * B)],
-        ]
-    )
-
-    return Q
-
-
-def get_macpx(
-    e_model1,
-    e_model2,
-    mu_model1,
-    mu_model2,
-    v,
-    plot_flag=False,
-    figure_name=None,
-    threshold=0.6,
-):
-    """Calculate the MACXP criterion to identify mode switchings.
-    Ref: P. Vacher, B. Jacquier, A. Bucharles, "Extensions of the MAC criterion
-    to complex modes", PROCEEDINGS OF ISMA2010 INCLUDING USD2010, pp.2713-2726
-    """
-
-    # get mode shape
-    modes = len(e_model1)
-
-    # calculate the MACXP criterion from equation [28] in the reference
-    macxp = np.zeros([modes, modes])
-    for ii, mii in enumerate(mu_model1.T):
-        for jj, mjj in enumerate(mu_model2.T):
-            coef = (
-                np.abs(np.vdot(mii, mjj)) / np.abs(np.conj(e_model1[ii]) + e_model2[jj])
-                + np.abs(np.dot(mii, mjj)) / np.abs(e_model1[ii] + e_model2[jj])
-            ) ** 2 / (
-                (
-                    np.vdot(mii, mii) / (2 * np.abs(e_model1[ii].real))
-                    + np.abs(np.dot(mii, mii)) / (2 * np.abs(e_model1[ii]))
-                )
-                * (
-                    np.vdot(mjj, mjj) / (2 * np.abs(e_model2[jj].real))
-                    + np.abs(np.dot(mjj, mjj)) / (2 * np.abs(e_model2[jj]))
-                )
-            )
-            macxp[ii, jj] = coef.real
-
-    if plot_flag:
-        ax = plt.figure().add_subplot()
-        im = ax.imshow(macxp, cmap="jet", vmin=0.0, vmax=1.0)
-        # create an axes on the right side of ax. The width of cax will be 5%
-        # of ax and the padding between cax and ax will be fixed at 0.05 inch.
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.1)
-        colorbar = plt.colorbar(im, cax=cax)
-        # Loop over data dimensions and create text annotations.
-        for i in range(modes):
-            for j in range(modes):
-                if macxp[i, j] >= threshold:
-                    text = ax.text(
-                        j,
-                        i,
-                        "%.2f" % macxp[i, j],
-                        ha="center",
-                        va="center",
-                        color="w",
-                        fontsize=8,
-                    )
-        ax.set_title(f"MACXP criterion at V={v}m/s")
-        if figure_name:
-            plt.savefig(figure_name)
-        plt.close()
-
-    return macxp
-
-
-def get_mode_order(macxp, threshold=0.6, dthreashold=0.6):
-    """Determine most likely mode numbering based on macxp criterion.
-    If the order cannot be determined, the algorithm fails and the velocity
-    increment is cut-back.
-
-    Note: had to increase dthreashold to large value (0.6) to ensure plate model convergence with 16 modes.
-    """
-
-    modes = macxp.shape[0]
-    mode_ids = np.zeros(modes)
-    mcounter = 1
-    for mode in macxp:
-        index = np.argwhere(mode >= threshold)
-        if len(index) < 2 or len(index) > 2:
-            index = np.argsort(mode)[-2:]
-            if mode_ids[index[1]]:
-                # this mode has already been alocated a mode_id
-                continue
-            elif np.abs(mode[index[0]] - threshold) <= dthreashold:
-                if DEBUG_MODE_TRACKING_FLAG:
-                    print(f"Mode tracking threshold set to {mode[index[0]]}.")
-            elif mode[index[0]] - threshold < -dthreashold:
-                break
-            elif mode[index[0]] - threshold > dthreashold:
-                break
-        assert len(index) == 2, "Something went wrong here..."
-        if not all(mode_ids[index]):
-            mode_ids[index] = mcounter
-            mcounter += 1
-
-    if all(mode_ids > 0.0) and all(mode_ids <= modes / 2):
-        # mode ordering successful
-        return mode_ids, True
-    else:
-        # mode ordering failed
-        return mode_ids, False
-
-
-def plot_histories(inputs):
-    """Plot QOIs y over input range x."""
-
-    for input in inputs:
-        ax = plt.figure().add_subplot()
-        for index, series in enumerate(input["y"].T):
-            ax.plot(
-                input["x"],
-                series,
-                marker="o",
-                linestyle="-",
-                color=input["colors"][index],
-            )
-        ax.set_xlabel(input["x_label"])
-        ax.set_ylabel(input["y_label"])
-        ax.grid(visible=True, which="major", color="#999999", linestyle="-", alpha=0.2)
-        plt.savefig(input["fname"])
-        plt.close()
-
-
-def get_complex_aero_modes(
-    problem, rho, Vdict, k=10, plot_flag=False, folder=None, threshold=0.55
-):
-    """Solve the aeroelastic stability equations at incrementally increasing
-    velocity values to identify flutter and divergence speeds (pk method)."""
-
-    print("Starting aeroelastic stability analysis.")
-
-    V_omega = np.zeros([0, k])
-    V_damping = np.zeros([0, k])
-    V_eig = np.empty([0, k], dtype=np.complex128)
-    V_mode_id = np.zeros([0, k])
-    V_flutter = np.zeros([0, k], dtype=np.bool8)
-    V_divergence = np.zeros([0, k], dtype=np.bool8)
-    V_eigv_memory = np.empty([k, k], dtype=np.complex128)
-    flutter = []
-    divergence = []
-    vinc = Vdict["inc0"]  # starting velocity increment
-    velocity = Vdict["start"]
-    index = 0
-    V = []
-    incV_flag = True
-    while incV_flag:
-
-        tracked = False
-        iteration_counter = 0
-        while tracked is False:
-
-            # solve complex eigenvalue problem
-            Q = get_system_matrix(problem, rho, velocity)
-            evals_small, evecs_small = eigs(Q, k=k, sigma=0.0, which="LM")
-
-            # mode tracking
-            if index == 0:
-                e_model1 = evals_small
-                e_model2 = e_model1
-                mu_model1 = evecs_small[k:, :]
-                mu_model2 = mu_model1
-            else:
-                e_model1 = V_eig[index - 1, :]
-                e_model2 = evals_small
-                mu_model1 = V_eigv_memory
-                mu_model2 = evecs_small[k:, :]
-            macxp = get_macpx(
-                e_model1,
-                e_model2,
-                mu_model1=mu_model1,
-                mu_model2=mu_model2,
-                v=velocity,
-                plot_flag=DEBUG_MODE_TRACKING_FLAG,
-                figure_name=str(Path(folder, "macxp.png")),
-                threshold=threshold,
-            )
-            mode_order, tracked = get_mode_order(macxp, threshold=threshold)
-            if not tracked:
-
-                # reduce velocity increment of current step
-                if index == 0:
-                    velocity = Vdict["start"]
-                else:
-                    velocity = V[-1]
-                    vinc *= 0.75
-                    if vinc < Vdict["inc_min"]:
-                        vinc = Vdict["inc_min"]
-                    velocity += vinc
-                    iteration_counter += 1
-
-                if vinc < Vdict["inc_min"]:
-                    print(
-                        "No convergence of the mode tracking: reduce threshold or reduce min V increment."
-                    )
-                    break
-                elif iteration_counter > 20:
-                    print(
-                        "No convergence of the mode tracking: max number of iterations reached."
-                    )
-                    break
-                elif not all(mode_order <= macxp.shape[0] / 2):
-                    print(
-                        f"Mode tracking failed at V={velocity} likely due to mode moving outside tracked range. Request more modes."
-                    )
-                    break
-
-                print(f"Cut-back velocity increment to {vinc} m/z.")
-
-            else:
-                pat = [(0, 1), (0, 0)]
-                V_mode_id = np.append(V_mode_id, [mode_order], axis=0)
-                V_eig = np.pad(V_eig, pat, mode="empty")
-                V_omega = np.pad(V_omega, pat, mode="constant")
-                V_damping = np.pad(V_damping, pat, mode="constant")
-                V_flutter = np.pad(V_flutter, pat, mode="constant")
-                V_divergence = np.pad(V_divergence, pat, mode="constant")
-                if vinc < Vdict["inc0"]:
-                    vinc = Vdict["inc0"]
-                    print(f"Reset velocity increment to {vinc} m/s.")
-
-        if tracked:
-            try:
-                for mode in np.unique(V_mode_id[index, :]):
-                    ii = np.argwhere(V_mode_id[index, :] == mode)
-                    col = int(mode - 1)
-                    # reorder the eigenvalue output by ascending mode number (for plotting)
-                    V_eig[index, int((mode - 1) * 2)] = evals_small[ii[0]]
-                    V_eig[index, int((mode - 1) * 2 + 1)] = evals_small[ii[1]]
-                    V_eigv_memory[:, int((mode - 1) * 2)] = evecs_small[
-                        k:, ii[0]
-                    ].flatten()
-                    V_eigv_memory[:, int((mode - 1) * 2 + 1)] = evecs_small[
-                        k:, ii[1]
-                    ].flatten()
-                    if np.isclose(np.conj(evals_small[ii[0]]), evals_small[ii[1]]):
-                        # underdamped mode - complex conjugate modes
-                        e = evals_small[ii[0]]
-                        omega = np.abs(e)  # rads
-                        V_omega[index, col] = omega / (2 * np.pi)  # Hz
-                        V_damping[index, col] = -1.0 * e.real / omega * 100
-                        if V_damping[index, col] <= 0:
-                            V_flutter[index, col] = True
-                            if index == 0 or V_flutter[index - 1, col] == False:
-                                flutter.append({"mode": int(mode), "V": velocity})
-                    else:
-                        # critically or overdamped mode
-                        e = evals_small[ii]
-                        V_omega[index, col] = 0.0  # Hz
-                        V_damping[index, col] = np.min(-1.0 * e.real / np.abs(e) * 100)
-                        if V_damping[index, col] <= 0:
-                            V_divergence[index, col] = True
-                            if index == 0 or V_divergence[index - 1, col] == False:
-                                divergence.append({"mode": int(mode), "V": velocity})
-                V.append(velocity)
-                print(f"V={velocity}m/s step completed.")
-                velocity += vinc
-                index += 1
-
-            except Exception as err:
-                print("ERROR - Exiting aeroelastic stability analysis.")
-                print(f"Caught error: {err=}, {type(err)=}")
-                V.append(velocity)
-                incV_flag = False
-        else:
-            incV_flag = False
-            print("Warning: Exiting aeroelastic stability analysis.")
-
-        if velocity >= Vdict["end"]:
-            incV_flag = False
-            print("Completed aeroelastic stability analysis.")
-
-    print("Flutter modes:", flutter)
-    print("Divergence modes:", divergence)
-
-    if plot_flag:
-        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-        repeat_colors = [
-            color
-            for sublist in [item for item in zip(colors, colors)]
-            for color in sublist
-        ]
-        plot_histories(
-            [
-                {
-                    "x": V,
-                    "y": V_omega[:, np.nonzero(V_omega[0, :])[0]],
-                    "x_label": "Airspeed, m/s",
-                    "y_label": "Frequency, Hz",
-                    "fname": str(Path(folder, "V_omega.png")),
-                    "colors": colors,
-                },
-                {
-                    "x": V,
-                    "y": V_damping[:, np.nonzero(V_damping[0, :])[0]],
-                    "x_label": "Airspeed, m/s",
-                    "y_label": "Damping ratio, %",
-                    "fname": str(Path(folder, "V_damping.png")),
-                    "colors": colors,
-                },
-                {
-                    "x": V,
-                    "y": V_eig.real,
-                    "x_label": "Airspeed, m/s",
-                    "y_label": "real part of eigenvalue",
-                    "fname": str(Path(folder, "V_eig_real.png")),
-                    "colors": repeat_colors,
-                },
-                {
-                    "x": V,
-                    "y": V_eig.imag,
-                    "x_label": "Airspeed, m/s",
-                    "y_label": "imaginary part of eigenvalue",
-                    "fname": str(Path(folder, "V_eig_imag.png")),
-                    "colors": repeat_colors,
-                },
-            ]
-        )
-
-    return V, V_omega, V_damping, V_eig, V_mode_id, flutter, divergence
-
-
 def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
 
     # dofs that are constrained
     csv_file = Path(folder, "SPC_123456.bou")
-    fixed_dofs = read_matrix_csv(csv_file, delimiter=",", skip_lines_with="**")
+    fixed_dofs = _read_matrix_csv(csv_file, delimiter=",", skip_lines_with="**")
 
     # load row_dof lookup matrix, where each row matches K, M matrix rows and corresponds
     # to node.dir combination
     csv_file = Path(folder, file + "." + "dof")
-    lookup = read_matrix_csv(csv_file, delimiter=".")
+    lookup = _read_matrix_csv(csv_file, delimiter=".")
 
     # read shell node locations from input file
     csv_file = Path(folder, "all.msh")
-    nodes_xyz = read_matrix_csv(
+    nodes_xyz = _read_matrix_csv(
         csv_file, delimiter=",", skip_lines_with="*", read_only="*NODE"
     )
     # filter nodes for aero shape interpolation (e.g. only upper surface on box)
@@ -717,8 +96,8 @@ def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
     problem = {}
     for matrix in ["mas", "sti"]:
         csv_file = Path(folder, file + "." + matrix)
-        data = read_matrix_csv(csv_file)
-        problem[matrix] = get_matrix(data)  # , filter_out_rows=fixed_dofs_rows)
+        data = _read_matrix_csv(csv_file)
+        problem[matrix] = _get_matrix(data)  # , filter_out_rows=fixed_dofs_rows)
 
     # check that the stiffness matrix is positive definite
     if not all(eigsh(problem["sti"])[0] > 0):
@@ -727,7 +106,7 @@ def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
         print("Warning: Mass matrix is not positive definite.")
 
     # normal modes analysis
-    omega, evals, evecs = get_normal_modes(problem, k=k_modes)
+    omega, _, evecs = get_normal_modes(problem, k=k_modes)
 
     if aero_inputs:
         assert (
@@ -749,13 +128,19 @@ def main(file, folder, aero_inputs=None, box_inputs=None, k_modes=10):
         aeronodes = np.vstack([aeromodel.le_nodes, aeromodel.te_nodes])
 
         # filter normal mode eigenvector DOFs and reduce from 3D element nodes to shell nodes
-        aero_evecs = get_aero_evects(
-            evecs, lookup, nodes_xyz, aeronodes, fixed=fixed_dofs, plot_flag=False
+        aero_evecs = _get_aero_evects(
+            evecs,
+            lookup,
+            nodes_xyz,
+            aeronodes,
+            fixed=fixed_dofs,
+            dirs=[3],
+            plot_flag=False,
         )
 
         # get aero damping and stiffness matrices B and C
-        problem["B"] = get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25)
-        problem["C"] = get_aero_stiffness(aeromodel, aero_evecs, e=0.25)
+        problem["B"] = _get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25)
+        problem["C"] = _get_aero_stiffness(aeromodel, aero_evecs, e=0.25)
 
         # flutter / divergence analysis
         V, V_omega, V_damping, _, _, flutter, divergence = get_complex_aero_modes(
@@ -882,6 +267,666 @@ def parametric_box_tests():
         {"mode": 3, "V": 136.0},
     ]
     assert divergence == [{"mode": 1, "V": 96.0}]
+
+
+def get_normal_modes(problem, k=10):
+    """Solve an real eigenvalue problem to obtain the k lowest eigenvalues and
+    eigenvectors."""
+
+    evals_small, evecs_small = eigsh(
+        problem["sti"], k=k, M=problem["mas"], sigma=0.0, which="LM"
+    )
+    # print frequencies in Hz
+    omega = np.sqrt(evals_small) / (2 * np.pi)
+    print("Normal modes frequencies (Hz): ", omega)
+
+    return omega, evals_small, evecs_small
+
+
+def get_complex_aero_modes(
+    problem, rho, Vdict, k=10, plot_flag=False, folder=None, threshold=0.55
+):
+    """Solve the aeroelastic stability equations at incrementally increasing
+    velocity values to identify flutter and divergence speeds."""
+
+    print("Starting aeroelastic stability analysis.")
+
+    V_omega = np.zeros([0, k])
+    V_damping = np.zeros([0, k])
+    V_eig = np.empty([0, k], dtype=np.complex128)
+    V_mode_id = np.zeros([0, k])
+    V_flutter = np.zeros([0, k], dtype=np.bool8)
+    V_divergence = np.zeros([0, k], dtype=np.bool8)
+    V_eigv_memory = np.empty([k, k], dtype=np.complex128)
+    flutter = []
+    divergence = []
+    vinc = Vdict["inc0"]  # starting velocity increment
+    velocity = Vdict["start"]
+    index = 0
+    V = []
+    incV_flag = True
+    while incV_flag:
+
+        tracked = False
+        iteration_counter = 0
+        while tracked is False:
+
+            # solve complex eigenvalue problem
+            Q = _get_system_matrix(problem, rho, velocity)
+            evals_small, evecs_small = eigs(Q, k=k, sigma=0.0, which="LM")
+
+            # mode tracking
+            if index == 0:
+                e_model1 = evals_small
+                e_model2 = e_model1
+                mu_model1 = evecs_small[k:, :]
+                mu_model2 = mu_model1
+            else:
+                e_model1 = V_eig[index - 1, :]
+                e_model2 = evals_small
+                mu_model1 = V_eigv_memory
+                mu_model2 = evecs_small[k:, :]
+            macxp = _get_macpx(
+                e_model1,
+                e_model2,
+                mu_model1=mu_model1,
+                mu_model2=mu_model2,
+                v=velocity,
+                plot_flag=DEBUG_MODE_TRACKING_FLAG,
+                figure_name=str(Path(folder, "macxp.png")),
+                threshold=threshold,
+            )
+            mode_order, tracked = _get_mode_order(macxp, threshold=threshold)
+            if not tracked:
+
+                # reduce velocity increment of current step
+                if index == 0:
+                    velocity = Vdict["start"]
+                else:
+                    velocity = V[-1]
+                    vinc *= 0.75
+                    if vinc < Vdict["inc_min"]:
+                        vinc = Vdict["inc_min"]
+                    velocity += vinc
+                    iteration_counter += 1
+
+                if vinc < Vdict["inc_min"]:
+                    print(
+                        "No convergence of the mode tracking: reduce threshold or reduce min V increment."
+                    )
+                    break
+                elif iteration_counter > 20:
+                    print(
+                        "No convergence of the mode tracking: max number of iterations reached."
+                    )
+                    break
+                elif not all(mode_order <= macxp.shape[0] / 2):
+                    print(
+                        f"Mode tracking failed at V={velocity} likely due to mode moving outside tracked range. Request more modes."
+                    )
+                    break
+
+                print(f"Cut-back velocity increment to {vinc} m/z.")
+
+            else:
+                pat = [(0, 1), (0, 0)]
+                V_mode_id = np.append(V_mode_id, [mode_order], axis=0)
+                V_eig = np.pad(V_eig, pat, mode="empty")
+                V_omega = np.pad(V_omega, pat, mode="constant")
+                V_damping = np.pad(V_damping, pat, mode="constant")
+                V_flutter = np.pad(V_flutter, pat, mode="constant")
+                V_divergence = np.pad(V_divergence, pat, mode="constant")
+                if vinc < Vdict["inc0"]:
+                    vinc = Vdict["inc0"]
+                    print(f"Reset velocity increment to {vinc} m/s.")
+
+        if tracked:
+            try:
+                for mode in np.unique(V_mode_id[index, :]):
+                    ii = np.argwhere(V_mode_id[index, :] == mode)
+                    col = int(mode - 1)
+                    # reorder the eigenvalue output by ascending mode number (for plotting)
+                    V_eig[index, int((mode - 1) * 2)] = evals_small[ii[0]]
+                    V_eig[index, int((mode - 1) * 2 + 1)] = evals_small[ii[1]]
+                    V_eigv_memory[:, int((mode - 1) * 2)] = evecs_small[
+                        k:, ii[0]
+                    ].flatten()
+                    V_eigv_memory[:, int((mode - 1) * 2 + 1)] = evecs_small[
+                        k:, ii[1]
+                    ].flatten()
+                    if np.isclose(np.conj(evals_small[ii[0]]), evals_small[ii[1]]):
+                        # underdamped mode - complex conjugate modes
+                        e = evals_small[ii[0]]
+                        omega = np.abs(e)  # rads
+                        V_omega[index, col] = omega / (2 * np.pi)  # Hz
+                        V_damping[index, col] = -1.0 * e.real / omega * 100
+                        if V_damping[index, col] <= 0:
+                            V_flutter[index, col] = True
+                            if index == 0 or V_flutter[index - 1, col] == False:
+                                flutter.append({"mode": int(mode), "V": velocity})
+                    else:
+                        # critically or overdamped mode
+                        e = evals_small[ii]
+                        V_omega[index, col] = 0.0  # Hz
+                        V_damping[index, col] = np.min(-1.0 * e.real / np.abs(e) * 100)
+                        if V_damping[index, col] <= 0:
+                            V_divergence[index, col] = True
+                            if index == 0 or V_divergence[index - 1, col] == False:
+                                divergence.append({"mode": int(mode), "V": velocity})
+                V.append(velocity)
+                print(f"V={velocity}m/s step completed.")
+                velocity += vinc
+                index += 1
+
+            except Exception as err:
+                print("ERROR - Exiting aeroelastic stability analysis.")
+                print(f"Caught error: {err=}, {type(err)=}")
+                V.append(velocity)
+                incV_flag = False
+        else:
+            incV_flag = False
+            print("Warning: Exiting aeroelastic stability analysis.")
+
+        if velocity >= Vdict["end"]:
+            incV_flag = False
+            print("Completed aeroelastic stability analysis.")
+
+    print("Flutter modes:", flutter)
+    print("Divergence modes:", divergence)
+
+    if plot_flag:
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        repeat_colors = [
+            color
+            for sublist in [item for item in zip(colors, colors)]
+            for color in sublist
+        ]
+        _plot_histories(
+            [
+                {
+                    "x": V,
+                    "y": V_omega[:, np.nonzero(V_omega[0, :])[0]],
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "Frequency, Hz",
+                    "fname": str(Path(folder, "V_omega.png")),
+                    "colors": colors,
+                },
+                {
+                    "x": V,
+                    "y": V_damping[:, np.nonzero(V_damping[0, :])[0]],
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "Damping ratio, %",
+                    "fname": str(Path(folder, "V_damping.png")),
+                    "colors": colors,
+                },
+                {
+                    "x": V,
+                    "y": V_eig.real,
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "real part of eigenvalue",
+                    "fname": str(Path(folder, "V_eig_real.png")),
+                    "colors": repeat_colors,
+                },
+                {
+                    "x": V,
+                    "y": V_eig.imag,
+                    "x_label": "Airspeed, m/s",
+                    "y_label": "imaginary part of eigenvalue",
+                    "fname": str(Path(folder, "V_eig_imag.png")),
+                    "colors": repeat_colors,
+                },
+            ]
+        )
+
+    return V, V_omega, V_damping, V_eig, V_mode_id, flutter, divergence
+
+
+########### Private functions that do not get called directly
+
+
+def _read_matrix_csv(file, delimiter=" ", skip_lines_with=None, read_only=None):
+    """Reads csv and strips empty entries."""
+
+    if read_only is None:
+        read_flag = True
+    else:
+        read_flag = False
+
+    with open(file, newline="") as csvfile:
+        reader = csv.reader(csvfile, delimiter=delimiter)
+        if skip_lines_with is None and read_flag:
+            data = [[float(val) for val in row if bool(val.strip())] for row in reader]
+        elif skip_lines_with and read_flag:
+            data = [
+                [float(val) for val in row if bool(val.strip())]
+                for row in reader
+                if not skip_lines_with in row[0]
+            ]
+        elif not read_flag:
+            data = []
+            for row in reader:
+                if not read_flag and read_only in row[0]:
+                    read_flag = True
+                    continue
+                elif read_flag and skip_lines_with in row[0]:
+                    read_flag = False
+                    break
+                elif read_flag:
+                    data.append([float(val) for val in row if bool(val.strip())])
+
+    return np.array(data)
+
+
+def _get_matrix(data, filter_out_rows=None):
+    """Transform CCX matrix csv output to sparce matrix format."""
+
+    mask = np.ones(len(data), dtype=bool)
+    if filter_out_rows:
+        # set the mask to false where the index is a filtered row
+        frows = []
+        for row in filter_out_rows:
+            # get the filtered row / col indices
+            index = np.sort(
+                np.hstack(
+                    [np.where(data[:, 0] == row)[0], np.where(data[:, 1] == row)[0]]
+                )
+            )
+            # index = np.sort(np.where(data[:,1] == row)[0])
+            if index.size > 0:
+                frows += index.tolist()
+        mask[frows] = False
+
+    # data array contains (row, col, val) in each row
+    m, n = np.max(data[:, :2], axis=0)
+    matrix = np.zeros((int(m), int(n)), dtype=np.float64)
+    for row in data[mask, :]:
+        matrix[int(row[0] - 1), int(row[1] - 1)] = row[2]
+    submatrix = np.where(np.any(matrix < 0, axis=1) | np.any(matrix > 0, axis=1))[0]
+    mat = matrix[np.reshape(submatrix, (-1, 1)), submatrix]
+    return csr_matrix(mat + np.tril(mat.T, k=-1))
+
+
+def _filter_evec(node_ids, dirs, lookup, evecs):
+    """Filter eigenvector output from ccx to certain node xyz ranges and dimensions only."""
+
+    mask = np.ones(len(lookup), dtype=bool)
+    for index, row in enumerate(lookup):
+        if not row[0] in node_ids or not row[1] in dirs:
+            mask[index] = False
+
+    filtered_evecs = evecs[mask, :]
+    filtered_dofs = lookup[mask, :]
+
+    return filtered_evecs, filtered_dofs
+
+
+def _get_unique_evecs(filtered_evecs, filtered_dofs):
+    """Average displacements at duplicate dofs - required due to expansion of shells
+    to 3D elements in CCX, which results in duplicate DOFs in the eigenvector output."""
+
+    reduced_dofs = np.unique(filtered_dofs, axis=0)
+    reduced_evecs = np.zeros([len(reduced_dofs), filtered_evecs.shape[1]])
+    for index, dof in enumerate(reduced_dofs):
+        # get indices of repeated dofs
+        indices = np.where((filtered_dofs == dof).all(axis=1))[0]
+        reduced_evecs[index, :] = np.average(filtered_evecs[indices, :], axis=0)
+
+    return reduced_evecs, reduced_dofs
+
+
+def _apply_boundary_conditions(reduced_evecs, reduced_dofs, fixed):
+    """Ensure that deflections are fixed at boundary condition nodes. Due to
+    expansion of the shell elements to 3D elements in CCX, there may be non-zero eigenvector
+    outputs at nodes corresponding to 3D element mid-height nodes, as these are not constrained
+    even when all displacements and rotations are constrained on the corresponding shell element
+    nodes."""
+
+    mask = np.zeros(len(reduced_dofs), dtype=bool)
+    frows = []
+    for row in fixed:
+        index = np.where((reduced_dofs == row).all(axis=1))[0]
+        # index = np.sort(np.where(data[:,1] == row)[0])
+        if index.size > 0:
+            frows += index.tolist()
+    mask[frows] = True
+
+    reduced_evecs[mask, :] = 0.0
+
+    return reduced_evecs
+
+
+def _plot_modes(data_sets, modes="all"):
+    """Plot overlay of the structures and aero modes to check they match."""
+
+    if modes == "all":
+        # one figure per eigenvector
+        modes = data_sets[0][2].shape[1]
+
+    for mode in range(modes):
+        fig = plt.figure()
+        ax = fig.add_subplot(projection="3d")
+        for data in data_sets:
+            ax.scatter(data[0], data[1], data[2][:, mode], label=data[3])
+            if data[3] == "AERO":
+                LE_indices = int(len(data[0]) / 2)
+                ax.plot3D(
+                    data[0][:LE_indices],
+                    data[1][:LE_indices],
+                    data[2][:LE_indices, mode],
+                    "grey",
+                )
+                ax.plot3D(
+                    data[0][LE_indices:],
+                    data[1][LE_indices:],
+                    data[2][LE_indices:, mode],
+                    "grey",
+                )
+        ax.set_xlabel("X, m")
+        ax.set_ylabel("Y, m")
+        ax.set_zlabel("Z, normalised")
+        ax.legend()
+
+    plt.show()
+
+
+def _get_aero_evects(
+    evecs, lookup, nodes_xyz, aeronodes, fixed=None, dirs=None, plot_flag=False
+):
+
+    # filter evecs to nodes xyz and dims only
+    filtered_evecs, filtered_dofs = _filter_evec(
+        node_ids=nodes_xyz[:, 0].astype(int),
+        dirs=dirs,
+        lookup=lookup.astype(int),
+        evecs=evecs,
+    )
+
+    # average duplicate dofs
+    reduced_evecs, reduced_dofs = _get_unique_evecs(
+        filtered_evecs, filtered_dofs.astype(int)
+    )
+
+    # set boundary conditions to zero
+    if not fixed is None:
+        reduced_evecs = _apply_boundary_conditions(reduced_evecs, reduced_dofs, fixed)
+
+    # get xyz for all dof nodes
+    X = np.zeros([len(reduced_dofs)])
+    Y = np.zeros([len(reduced_dofs)])
+    for index, dof in enumerate(reduced_dofs):
+        node_index = np.where(nodes_xyz[:, 0] == dof[0])[0]
+        X[index] = nodes_xyz[node_index, 1]
+        Y[index] = nodes_xyz[node_index, 2]
+
+    # interpolate aero eigenvectors
+    aero_evecs = np.zeros([len(aeronodes), reduced_evecs.shape[1]])
+    for index, evect in enumerate(reduced_evecs.transpose()):
+        f = LinearNDInterpolator((X, Y), evect, fill_value=0.0)
+        for nodeid, node in enumerate(aeronodes):
+            aero_evecs[nodeid, index] = f(node[0], node[1])
+
+    # plot selected modes for visual check
+    if plot_flag:
+        _plot_modes(
+            [
+                (X, Y, reduced_evecs, "FEM"),
+                (aeronodes[:, 0], aeronodes[:, 1], aero_evecs, "AERO"),
+            ]
+        )
+
+    return aero_evecs
+
+
+def _get_chords_from_aero_dofs(aeromodel):
+    """Recover the aerodynamic chord lengths from the leading and trailing edge
+    aero node positions."""
+
+    c = np.zeros([len(aeromodel.le_nodes), 1])
+    for ii in range(len(aeromodel.le_nodes)):
+        c[ii] = aeromodel.te_nodes[ii, 0] - aeromodel.le_nodes[ii, 0]
+    return c
+
+
+def _get_lift_factor_from_aero_dofs(aeromodel, span):
+    """Define the effective lift coefficient at every strip. Includes an
+    approximation of the tip effects, where lift tends to 0 at the free edge."""
+
+    aw = np.zeros([len(aeromodel.le_nodes), 1])
+    for ii in range(len(aeromodel.le_nodes)):
+        aw[ii] = aeromodel.aero_inputs["CL_alpha"] * (
+            1 - (aeromodel.le_nodes[ii, 1] / span) ** 3
+        )
+    return aw
+
+
+def _get_phi(aero_evecs, option):
+    """Intermediary function to return eigenvector combinations related to the
+    local strip average w (flapping) deflection (option == "LEplusTE") or the local
+    twist (option == "LEminusTE")."""
+
+    nnodes = int(aero_evecs.shape[0] / 2)
+    phi = np.zeros([nnodes, aero_evecs.shape[1]])
+    for index, col in enumerate(aero_evecs.T):
+        if option == "LEplusTE":
+            phi[:, index] = col[:nnodes] + col[nnodes:]
+        elif option == "LEminusTE":
+            phi[:, index] = col[:nnodes] - col[nnodes:]
+        else:
+            raise ValueError(f"Option {option} is not recognised.")
+    return phi
+
+
+def _get_aero_component_matrices(aeromodel, aero_evecs):
+
+    # get component matrices
+    span = aeromodel._point_b[1]
+    nstrips = aeromodel.aero_inputs["strips"]
+    c = _get_chords_from_aero_dofs(aeromodel)  # vector of length dof/2
+    aw = _get_lift_factor_from_aero_dofs(aeromodel, span)  # vector of length dof/2
+    dy_strips = (
+        np.vstack([np.array([0.5]), np.ones([nstrips - 1, 1]), np.array([0.5])])
+        * span
+        / (nstrips + 1)
+    )  # vector of length dof/2
+
+    # matrices of dof/2 * n eigenvectors
+    phi_LEplusTE = _get_phi(aero_evecs, option="LEplusTE")
+    phi_LEminusTE = _get_phi(aero_evecs, option="LEminusTE")
+
+    return c, aw, dy_strips, phi_LEplusTE, phi_LEminusTE
+
+
+def _get_aero_damping(aeromodel, aero_evecs, Mxi_dot=-1.2, e=0.25):
+    """Modified strip theory aero damping, with a quasi-static Mtheta_dot term and
+    e being a load excentricity factor corresponding to the ratio of the flexural
+    axis offset from the aerodynamic centre to the chord length."""
+
+    c, aw, dy_strips, phi_LEplusTE, phi_LEminusTE = _get_aero_component_matrices(
+        aeromodel, aero_evecs
+    )
+    mat_size = aero_evecs.shape[1]
+    B_mat = np.zeros([mat_size, mat_size], dtype=np.float64)
+    for index in range(mat_size):
+        B_mat[index, :] = (
+            (1 / 8)
+            * phi_LEplusTE[:, index].transpose()
+            @ np.diag((c * aw * dy_strips)[:, 0])
+            @ phi_LEplusTE
+            - (e / 4)
+            * phi_LEminusTE[:, index].transpose()
+            @ np.diag((c * aw * dy_strips)[:, 0])
+            @ phi_LEplusTE
+            - (Mxi_dot / 8)
+            * phi_LEminusTE[:, index].transpose()
+            @ np.diag((c * dy_strips)[:, 0])
+            @ phi_LEminusTE
+        )
+
+    return csr_matrix(B_mat)
+
+
+def _get_aero_stiffness(aeromodel, aero_evecs, e=0.25):
+    """Modified strip theory aero stiffness, with e being a load excentricity factor
+    corresponding to the ratio of the flexural axis offset from the aerodynamic centre
+    to the chord length."""
+
+    _, aw, dy_strips, phi_LEplusTE, phi_LEminusTE = _get_aero_component_matrices(
+        aeromodel, aero_evecs
+    )
+    mat_size = aero_evecs.shape[1]
+    C_mat = np.zeros([mat_size, mat_size], dtype=np.float64)
+    for index in range(mat_size):
+        C_mat[index, :] = (1 / 4) * phi_LEplusTE[:, index].transpose() @ np.diag(
+            (aw * dy_strips)[:, 0]
+        ) @ phi_LEminusTE - (e / 2) * phi_LEminusTE[:, index].transpose() @ np.diag(
+            (aw * dy_strips)[:, 0]
+        ) @ phi_LEminusTE
+
+    return csr_matrix(C_mat)
+
+
+def _get_system_matrix(problem, rho, V):
+    """Define the modal aeroelastic system matrix Q.
+    Ref: Olivia Stodieck, Aeroelastic Tailoring of Tow-steered Composite Wings, Phd Thesis 2016
+    """
+
+    M = problem["M"]
+    K = problem["K"]
+    B = problem["B"]
+    C = problem["C"]
+    Q = bmat(
+        [
+            [None, eye(M.shape[0], dtype=np.float64)],
+            [-inv(M) @ (K + rho * V**2 * C), -inv(M) @ (rho * V * B)],
+        ]
+    )
+
+    return Q
+
+
+def _get_macpx(
+    e_model1,
+    e_model2,
+    mu_model1,
+    mu_model2,
+    v,
+    plot_flag=False,
+    figure_name=None,
+    threshold=0.6,
+):
+    """Calculate the MACXP criterion to identify mode switchings.
+    Ref: P. Vacher, B. Jacquier, A. Bucharles, "Extensions of the MAC criterion
+    to complex modes", PROCEEDINGS OF ISMA2010 INCLUDING USD2010, pp.2713-2726
+    """
+
+    # get mode shape
+    modes = len(e_model1)
+
+    # calculate the MACXP criterion from equation [28] in the reference
+    macxp = np.zeros([modes, modes])
+    for ii, mii in enumerate(mu_model1.T):
+        for jj, mjj in enumerate(mu_model2.T):
+            coef = (
+                np.abs(np.vdot(mii, mjj)) / np.abs(np.conj(e_model1[ii]) + e_model2[jj])
+                + np.abs(np.dot(mii, mjj)) / np.abs(e_model1[ii] + e_model2[jj])
+            ) ** 2 / (
+                (
+                    np.vdot(mii, mii) / (2 * np.abs(e_model1[ii].real))
+                    + np.abs(np.dot(mii, mii)) / (2 * np.abs(e_model1[ii]))
+                )
+                * (
+                    np.vdot(mjj, mjj) / (2 * np.abs(e_model2[jj].real))
+                    + np.abs(np.dot(mjj, mjj)) / (2 * np.abs(e_model2[jj]))
+                )
+            )
+            macxp[ii, jj] = coef.real
+
+    if plot_flag:
+        ax = plt.figure().add_subplot()
+        im = ax.imshow(macxp, cmap="jet", vmin=0.0, vmax=1.0)
+        # create an axes on the right side of ax. The width of cax will be 5%
+        # of ax and the padding between cax and ax will be fixed at 0.05 inch.
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.1)
+        colorbar = plt.colorbar(im, cax=cax)
+        # Loop over data dimensions and create text annotations.
+        for i in range(modes):
+            for j in range(modes):
+                if macxp[i, j] >= threshold:
+                    text = ax.text(
+                        j,
+                        i,
+                        "%.2f" % macxp[i, j],
+                        ha="center",
+                        va="center",
+                        color="w",
+                        fontsize=8,
+                    )
+        ax.set_title(f"MACXP criterion at V={v}m/s")
+        if figure_name:
+            plt.savefig(figure_name)
+        plt.close()
+
+    return macxp
+
+
+def _get_mode_order(macxp, threshold=0.6, dthreashold=0.6):
+    """Determine most likely mode numbering based on macxp criterion.
+    If the order cannot be determined, the algorithm fails and the velocity
+    increment is cut-back.
+
+    Note: had to increase dthreashold to large value (0.6) to ensure plate model
+    convergence with 16 modes. TODO: look at other tracking methods.
+    """
+
+    modes = macxp.shape[0]
+    mode_ids = np.zeros(modes)
+    mcounter = 1
+    for mode in macxp:
+        index = np.argwhere(mode >= threshold)
+        if len(index) < 2 or len(index) > 2:
+            index = np.argsort(mode)[-2:]
+            if mode_ids[index[1]]:
+                # this mode has already been alocated a mode_id
+                continue
+            elif np.abs(mode[index[0]] - threshold) <= dthreashold:
+                if DEBUG_MODE_TRACKING_FLAG:
+                    print(f"Mode tracking threshold set to {mode[index[0]]}.")
+            elif mode[index[0]] - threshold < -dthreashold:
+                break
+            elif mode[index[0]] - threshold > dthreashold:
+                break
+        assert len(index) == 2, "Something went wrong here..."
+        if not all(mode_ids[index]):
+            mode_ids[index] = mcounter
+            mcounter += 1
+
+    if all(mode_ids > 0.0) and all(mode_ids <= modes / 2):
+        # mode ordering successful
+        return mode_ids, True
+    else:
+        # mode ordering failed
+        return mode_ids, False
+
+
+def _plot_histories(inputs):
+    """Plot QOIs y over input range x."""
+
+    for input in inputs:
+        ax = plt.figure().add_subplot()
+        for index, series in enumerate(input["y"].T):
+            ax.plot(
+                input["x"],
+                series,
+                marker="o",
+                linestyle="-",
+                color=input["colors"][index],
+            )
+        ax.set_xlabel(input["x_label"])
+        ax.set_ylabel(input["y_label"])
+        ax.grid(visible=True, which="major", color="#999999", linestyle="-", alpha=0.2)
+        plt.savefig(input["fname"])
+        plt.close()
 
 
 if __name__ == "__main__":
