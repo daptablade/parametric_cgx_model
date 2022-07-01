@@ -240,7 +240,7 @@ INPUTS = [
             {"id": "ORI_m45", "1": [1.0, 1.0, 0.0], "2": [-1.0, 1.0, 0.0]},
         ],
         "composite_layup": {
-            "aero": (["p_45"] + ["p_0"] + ["p_45"] * 2 + ["p_0"] + ["p_45"]),
+            "aero": (["p_m45"] + ["p_0"] + ["p_m45"] * 2 + ["p_0"] + ["p_m45"]),
         },
         "shell_set_name": {"aero": "Eall"},
         "composite_props_file": "composite_shell.inp",
@@ -1008,19 +1008,19 @@ def _get_commands(
     # SPC and load sets
     if fix_lines:
         for chunk in divide_chunks(fix_lines, max_entries_per_line):
-        commands.append(
+            commands.append(
                 "SETA SPC l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
-        )
+            )
     if loaded_lines:
         for chunk in divide_chunks(loaded_lines, max_entries_per_line):
-        commands.append(
+            commands.append(
                 "SETA LAST l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
-        )
+            )
     if loaded_surfaces:
         for chunk in divide_chunks(loaded_surfaces, max_entries_per_line):
-        commands.append(
+            commands.append(
                 "SETA TOP s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
-        )
+            )
 
     commands.append("# =============== \n")
     # surface meshes
@@ -1032,14 +1032,14 @@ def _get_commands(
     # sets of surfaces
     if rib_ids:
         for chunk in divide_chunks(rib_ids, max_entries_per_line):
-        commands.append(
+            commands.append(
                 "SETA RIBS s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
-        )
+            )
     if aero_ids:
         for chunk in divide_chunks(aero_ids, max_entries_per_line):
-        commands.append(
+            commands.append(
                 "SETA AERO s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
-        )
+            )
 
     commands.append("# =============== \n")
     # body meshes
