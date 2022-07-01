@@ -215,6 +215,18 @@ INPUTS = [
                 "orientation": "ORI_0",
             },
             {
+                "id": "p_45",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_45",
+            },
+            {
+                "id": "p_m45",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_m45",
+            },
+            {
                 "id": "p_90",
                 "thickness": 0.0002,
                 "material": "EL",
@@ -224,9 +236,11 @@ INPUTS = [
         "orientations": [
             {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
             {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
+            {"id": "ORI_45", "1": [-1.0, 1.0, 0.0], "2": [-1.0, -1.0, 0.0]},
+            {"id": "ORI_m45", "1": [1.0, 1.0, 0.0], "2": [-1.0, 1.0, 0.0]},
         ],
         "composite_layup": {
-            "aero": (["p_90"] + ["p_0"] + ["p_90"] * 2 + ["p_0"] + ["p_90"]),
+            "aero": (["p_45"] + ["p_0"] + ["p_45"] * 2 + ["p_0"] + ["p_45"]),
         },
         "shell_set_name": {"aero": "Eall"},
         "composite_props_file": "composite_shell.inp",
