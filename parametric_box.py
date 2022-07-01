@@ -215,6 +215,18 @@ INPUTS = [
                 "orientation": "ORI_0",
             },
             {
+                "id": "p_45",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_45",
+            },
+            {
+                "id": "p_m45",
+                "thickness": 0.0002,
+                "material": "EL",
+                "orientation": "ORI_m45",
+            },
+            {
                 "id": "p_90",
                 "thickness": 0.0002,
                 "material": "EL",
@@ -224,9 +236,11 @@ INPUTS = [
         "orientations": [
             {"id": "ORI_0", "1": [0.0, 1.0, 0.0], "2": [-1.0, 0.0, 0.0]},
             {"id": "ORI_90", "1": [1.0, 0.0, 0.0], "2": [0.0, 1.0, 0.0]},
+            {"id": "ORI_45", "1": [-1.0, 1.0, 0.0], "2": [-1.0, -1.0, 0.0]},
+            {"id": "ORI_m45", "1": [1.0, 1.0, 0.0], "2": [-1.0, 1.0, 0.0]},
         ],
         "composite_layup": {
-            "aero": (["p_90"] + ["p_0"] + ["p_90"] * 2 + ["p_0"] + ["p_90"]),
+            "aero": (["p_m45"] + ["p_0"] + ["p_m45"] * 2 + ["p_0"] + ["p_m45"]),
         },
         "shell_set_name": {"aero": "Eall"},
         "composite_props_file": "composite_shell.inp",
@@ -910,7 +924,12 @@ def _get_commands(
     merge_tol=0.001,
     cgx_ele_type=10,
     solver="abq",
+    max_entries_per_line=9,
 ):
+    def divide_chunks(l, n):
+        # looping till length l
+        for i in range(0, len(l), n):
+            yield l[i : i + n]
 
     commands = []
 
@@ -988,17 +1007,20 @@ def _get_commands(
     commands.append("# =============== \n")
     # SPC and load sets
     if fix_lines:
-        commands.append(
-            "SETA SPC l " + " ".join([f"L{line:05d}" for line in fix_lines]) + "\n"
-        )
+        for chunk in divide_chunks(fix_lines, max_entries_per_line):
+            commands.append(
+                "SETA SPC l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
+            )
     if loaded_lines:
-        commands.append(
-            "SETA LAST l " + " ".join([f"L{line:05d}" for line in loaded_lines]) + "\n"
-        )
+        for chunk in divide_chunks(loaded_lines, max_entries_per_line):
+            commands.append(
+                "SETA LAST l " + " ".join([f"L{line:05d}" for line in chunk]) + "\n"
+            )
     if loaded_surfaces:
-        commands.append(
-            "SETA TOP s " + " ".join([f"V{id:05d}" for id in loaded_surfaces]) + "\n"
-        )
+        for chunk in divide_chunks(loaded_surfaces, max_entries_per_line):
+            commands.append(
+                "SETA TOP s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
+            )
 
     commands.append("# =============== \n")
     # surface meshes
@@ -1009,13 +1031,15 @@ def _get_commands(
     commands.append("")
     # sets of surfaces
     if rib_ids:
-        commands.append(
-            "SETA RIBS s " + " ".join([f"V{id:05d}" for id in rib_ids]) + "\n"
-        )
+        for chunk in divide_chunks(rib_ids, max_entries_per_line):
+            commands.append(
+                "SETA RIBS s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
+            )
     if aero_ids:
-        commands.append(
-            "SETA AERO s " + " ".join([f"V{id:05d}" for id in aero_ids]) + "\n"
-        )
+        for chunk in divide_chunks(aero_ids, max_entries_per_line):
+            commands.append(
+                "SETA AERO s " + " ".join([f"V{id:05d}" for id in chunk]) + "\n"
+            )
 
     commands.append("# =============== \n")
     # body meshes

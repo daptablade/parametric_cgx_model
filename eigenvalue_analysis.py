@@ -206,16 +206,11 @@ def simple_plate_tests():
         k_modes=16,
     )
     assert flutter == [{"mode": 2, "V": 33.0}]
-    assert divergence == [{"mode": 1, "V": 35.0}]
+    assert divergence == []
     flutter_index = np.argwhere(np.isclose(V, flutter[0]["V"]))
     assert (
         V_damping[flutter_index[0] - 1, flutter[0]["mode"] - 1] > 0.0
         and V_damping[flutter_index[0], flutter[0]["mode"] - 1] <= 0.0
-    )
-    divergence_index = np.argwhere(np.isclose(V, divergence[0]["V"]))
-    assert (
-        V_damping[divergence_index[0] - 1, divergence[0]["mode"] - 1] > 0.0
-        and V_damping[divergence_index[0], divergence[0]["mode"] - 1] <= 0.0
     )
 
     freq_scipy, V, V_omega, V_damping, flutter, divergence = main(
@@ -226,6 +221,11 @@ def simple_plate_tests():
     )
     assert flutter == [{"mode": 2, "V": 26.5}]
     assert divergence == [{"mode": 1, "V": 32.5}]
+    divergence_index = np.argwhere(np.isclose(V, divergence[0]["V"]))
+    assert (
+        V_damping[divergence_index[0] - 1, divergence[0]["mode"] - 1] > 0.0
+        and V_damping[divergence_index[0], divergence[0]["mode"] - 1] <= 0.0
+    )
 
 
 def parametric_box_tests():
@@ -263,10 +263,12 @@ def parametric_box_tests():
     )
     assert np.allclose(freq_scipy, freq_ccx, rtol=1e-3)
     assert flutter == [
-        {"mode": 2, "V": 116.0},
-        {"mode": 3, "V": 136.0},
+        {"mode": 3, "V": 71.0},
+        {"mode": 4, "V": 76.0},
+        {"mode": 2, "V": 141.62},
+        {"mode": 4, "V": 141.74},
     ]
-    assert divergence == [{"mode": 1, "V": 96.0}]
+    assert divergence == []
 
 
 def get_normal_modes(problem, k=10):
@@ -403,7 +405,9 @@ def get_complex_aero_modes(
                         if V_damping[index, col] <= 0:
                             V_flutter[index, col] = True
                             if index == 0 or V_flutter[index - 1, col] == False:
-                                flutter.append({"mode": int(mode), "V": velocity})
+                                flutter.append(
+                                    {"mode": int(mode), "V": round(velocity, 2)}
+                                )
                     else:
                         # critically or overdamped mode
                         e = evals_small[ii]
@@ -412,7 +416,9 @@ def get_complex_aero_modes(
                         if V_damping[index, col] <= 0:
                             V_divergence[index, col] = True
                             if index == 0 or V_divergence[index - 1, col] == False:
-                                divergence.append({"mode": int(mode), "V": velocity})
+                                divergence.append(
+                                    {"mode": int(mode), "V": round(velocity, 2)}
+                                )
                 V.append(velocity)
                 print(f"V={velocity}m/s step completed.")
                 velocity += vinc
@@ -708,7 +714,7 @@ def _get_phi(aero_evecs, option):
     phi = np.zeros([nnodes, aero_evecs.shape[1]])
     for index, col in enumerate(aero_evecs.T):
         if option == "LEplusTE":
-            phi[:, index] = col[:nnodes] + col[nnodes:]
+            phi[:, index] = -col[:nnodes] - col[nnodes:]
         elif option == "LEminusTE":
             phi[:, index] = col[:nnodes] - col[nnodes:]
         else:
