@@ -27,7 +27,7 @@ Corresponding code release: [v0.0.3](https://github.com/daptablade/parametric_cg
 * 24/03/2022: [Multidisciplinary analysis with Python, PreCICE and Calculix Crunchix](https://www.dapta.com/multidisciplinary-analysis-with-python-precice-and-calculix-crunchix/) 
 Corresponding code release: [v0.0.4](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.4)
 * 30/06/2022: [Dynamic aeroelastic flutter and divergence analysis with Python and Calculix Crunchix](https://www.dapta.com/dynamic-aeroelastic-flutter-and-divergence-analysis-with-python-and-calculix-crunchix)
-Corresponding code release: [v0.0.5](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.5)
+Corresponding code release: [v0.0.5](https://github.com/daptablade/parametric_cgx_model/releases/tag/v0.0.5.fix2)
 
 ## Quick Start
 
