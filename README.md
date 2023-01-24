@@ -71,7 +71,7 @@ For preCICE, it is recommended you create a separate wsl virtual environment und
 
 * OpenMDAO: [https://openmdao.org/](https://openmdao.org/)
 
-* PreCICE: [https://precice.org/index.html](https://precice.org/index.html)
+* preCICE: [https://precice.org/index.html](https://precice.org/index.html)
 
 ## Author and License
 
@@ -79,6 +79,6 @@ Dr Olivia Stodieck, olivia.stodieck@dapta.com
 
 Dapta LTD, UK
 
-Visit us at [www.dapta.com](www.dapta.com)
+Visit us at [www.dapta.com](https://www.dapta.com/)
 
 This code is released under an MIT license - see LICENSE file.

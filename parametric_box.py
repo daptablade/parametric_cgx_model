@@ -13,7 +13,7 @@ choose between
 >> main(INPUT[0]) for a metallic Nastran model
 >> main(INPUT[1]) for a composite Calculix model
 >> main(INPUT[2]) for a multisection composite Calculix model with core
->> main(INPUT[3]) for a composite Calculix model static analysis as used by PreciCE
+>> main(INPUT[3]) for a composite Calculix model static analysis as used by preCICE
 >> main(INPUT[4]) for a composite Calculix model modal aeroelastic analysis
 
 """
