@@ -1,6 +1,6 @@
 # parametric_cgx_model
 
-**Feb 2023 Update – Read the updated tutorials for the dapta app here: https://daptadocs.com/Tutorials.**
+**Feb 2023 Update – Read the updated tutorials for the dapta app here: https://daptadocs.com**
 This includes new files and step by step walk-throughs for [chaining components](https://daptadocs.com/Tutorials/Chaining%20component%20analyses.html), automating the parametric [design studies with Calculix](https://daptadocs.com/Tutorials/Automating%20parametric%20studies.html) and design [optimisation using OpenMDAO](https://daptadocs.com/Tutorials/Automating%20design%20optimisations.html). 
 
 ## Description
